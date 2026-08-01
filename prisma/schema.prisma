@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PublicationStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+enum EvidenceStatus {
+  CONFIRMED
+  PENDING
+  UNAVAILABLE
+}
+
+enum MediaStatus {
+  QUARANTINED
+  APPROVED
+  REJECTED
+}
+
+enum ContactStatus {
+  NEW
+  READ
+  ARCHIVED
+}
+
+model AdminUser {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  passwordHash     String
+  failedLoginCount Int              @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  sessions         RefreshSession[]
+  auditLogs        AuditLog[]
+}
+
+model RefreshSession {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  userId       String
+  user         AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model AuditLog {
+  id         String     @id @default(cuid())
+  action     String
+  resource   String?
+  resourceId String?
+  ipHash     String?
+  metadata   Json?
+  createdAt  DateTime   @default(now())
+  actorId    String?
+  actor      AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+model Profile {
+  id           String   @id @default(cuid())
+  name         String
+  headline     String
+  bio          String
+  location     String
+  availability String
+  email        String?
+  cvMediaId    String?
+  updatedAt    DateTime @updatedAt
+}
+
+model Experience {
+  id           String            @id @default(cuid())
+  organization String
+  role         String
+  startDate    DateTime
+  endDate      DateTime?
+  summary      String
+  visibility   PublicationStatus @default(DRAFT)
+  order        Int               @default(0)
+}
+
+model Education {
+  id            String    @id @default(cuid())
+  institution   String
+  qualification String
+  field         String?
+  startDate     DateTime?
+  endDate       DateTime?
+  order         Int       @default(0)
+}
+
+model Capability {
+  id     String            @id @default(cuid())
+  group  String
+  label  String
+  order  Int               @default(0)
+  status PublicationStatus @default(DRAFT)
+}
+
+model Project {
+  id               String            @id @default(cuid())
+  slug             String            @unique
+  title            String
+  summary          String
+  overview         String?
+  context          String?
+  responsibilities String?
+  systemMap        String?
+  testStrategy     String?
+  fixAndRetest     String?
+  outcome          String?
+  lessons          String?
+  sceneState       String            @default("inspection")
+  status           PublicationStatus @default(DRAFT)
+  order            Int               @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  metrics          ProjectMetric[]
+  findings         ProjectFinding[]
+  media            ProjectMedia[]
+  posts            BlogPost[]
+}
+
+model ProjectMetric {
+  id         String         @id @default(cuid())
+  label      String
+  value      String
+  evidence   EvidenceStatus @default(PENDING)
+  sourceNote String?
+  order      Int            @default(0)
+  projectId  String
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ProjectFinding {
+  id             String         @id @default(cuid())
+  title          String
+  summary        String
+  severity       String?
+  evidenceStatus EvidenceStatus @default(PENDING)
+  order          Int            @default(0)
+  projectId      String
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ProjectMedia {
+  id        String     @id @default(cuid())
+  caption   String?
+  altText   String?
+  order     Int        @default(0)
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, mediaId])
+}
+
+model BlogPost {
+  id              String            @id @default(cuid())
+  title           String
+  slug            String            @unique
+  excerpt         String
+  body            String
+  readingTime     Int
+  author          String
+  status          PublicationStatus @default(DRAFT)
+  publishedAt     DateTime?
+  seoTitle        String
+  seoDescription  String
+  socialImageId   String?
+  featuredImageId String?
+  categoryId      String
+  category        BlogCategory      @relation(fields: [categoryId], references: [id])
+  tags            BlogTag[]
+  projects        Project[]
+  relatedPosts    BlogPost[]        @relation("RelatedPosts")
+  relatedTo       BlogPost[]        @relation("RelatedPosts")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model BlogCategory {
+  id    String     @id @default(cuid())
+  name  String
+  slug  String     @unique
+  posts BlogPost[]
+}
+
+model BlogTag {
+  id    String     @id @default(cuid())
+  name  String
+  slug  String     @unique
+  posts BlogPost[]
+}
+
+model LinkedInHighlight {
+  id        String            @id @default(cuid())
+  publicUrl String
+  title     String
+  summary   String
+  postDate  DateTime
+  imageId   String?
+  order     Int               @default(0)
+  featured  Boolean           @default(false)
+  mode      String            @default("custom")
+  status    PublicationStatus @default(DRAFT)
+}
+
+model GameConfig {
+  id        String   @id @default(cuid())
+  mode      String   @unique
+  enabled   Boolean  @default(false)
+  settings  Json
+  updatedAt DateTime @updatedAt
+}
+
+model GameChallenge {
+  id           String            @id @default(cuid())
+  slug         String            @unique
+  type         String
+  title        String
+  instructions String
+  config       Json
+  status       PublicationStatus @default(DRAFT)
+  order        Int               @default(0)
+}
+
+model GameAchievement {
+  id          String            @id @default(cuid())
+  slug        String            @unique
+  title       String
+  description String
+  threshold   Json
+  status      PublicationStatus @default(DRAFT)
+}
+
+model ContactMessage {
+  id        String        @id @default(cuid())
+  name      String
+  email     String
+  subject   String?
+  message   String
+  status    ContactStatus @default(NEW)
+  consentAt DateTime
+  createdAt DateTime      @default(now())
+  ipHash    String?
+}
+
+model MediaAsset {
+  id         String         @id @default(cuid())
+  filename   String
+  storageKey String         @unique
+  mimeType   String
+  extension  String
+  byteSize   Int
+  sha256     String
+  status     MediaStatus    @default(QUARANTINED)
+  altText    String?
+  width      Int?
+  height     Int?
+  durationMs Int?
+  createdAt  DateTime       @default(now())
+  projects   ProjectMedia[]
+}
+
+model SiteSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
