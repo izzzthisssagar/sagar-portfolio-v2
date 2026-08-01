@@ -1,0 +1,27 @@
+{
+  "name": "sagar-portfolio-v2",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev --parallel",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "test:e2e": "playwright test",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@prisma/client": "7.9.1",
+    "prettier": "3.6.2",
+    "prisma": "7.9.1",
+    "turbo": "2.10.8",
+    "typescript": "5.9.3"
+  }
+}
