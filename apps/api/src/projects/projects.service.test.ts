@@ -35,6 +35,7 @@ function setup() {
   const prisma = {
     project: {
       findUnique: vi.fn().mockResolvedValue(project),
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([project]),
       count: vi.fn().mockResolvedValue(1),
     },
@@ -49,11 +50,22 @@ function setup() {
 describe('ProjectsService', () => {
   it('paginates with a stable id tiebreaker', async () => {
     const { service, prisma } = setup();
-    const result = await service.list({ page: 2, limit: 10, sort: 'order', direction: 'asc' });
+    const result = await service.listAdmin({ page: 2, limit: 10, sort: 'order', direction: 'asc' });
     expect(result.meta).toEqual({ page: 2, limit: 10, total: 1 });
     expect(prisma.project.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ skip: 10, take: 10, orderBy: [{ order: 'asc' }, { id: 'asc' }] }),
     );
+  });
+  it('always constrains public queries and detail to published records', async () => {
+    const { service, prisma } = setup();
+    await service.listPublic({ page: 1, limit: 20, sort: 'order', direction: 'asc' });
+    expect(prisma.project.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: 'PUBLISHED' }) }),
+    );
+    await expect(service.getPublicBySlug('draft')).rejects.toThrow('Project not found');
+    expect(prisma.project.findFirst).toHaveBeenCalledWith({
+      where: { slug: 'draft', status: 'PUBLISHED' },
+    });
   });
   it('creates, changes slug without changing identity, and deletes with audit events', async () => {
     const { service, tx, auditCreate } = setup();

@@ -1,7 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PublicationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import type { CreateProjectDto, ListProjectsDto, UpdateProjectDto } from './projects.dto';
+import type {
+  CreateProjectDto,
+  ListProjectsDto,
+  PublicListProjectsDto,
+  UpdateProjectDto,
+} from './projects.dto';
 
 const statusToDb = (status: string) => status.toUpperCase() as PublicationStatus;
 const projectView = <T extends { status: PublicationStatus }>(project: T) => ({
@@ -13,12 +18,13 @@ const projectView = <T extends { status: PublicationStatus }>(project: T) => ({
 export class ProjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(query: ListProjectsDto) {
+  private async list(query: PublicListProjectsDto, publication?: PublicationStatus) {
     const where: Prisma.ProjectWhereInput = {
-      ...(query.status ? { status: statusToDb(query.status) } : {}),
+      ...(publication ? { status: publication } : {}),
       ...(query.search
         ? {
             OR: [
+              { slug: { contains: query.search, mode: 'insensitive' } },
               { title: { contains: query.search, mode: 'insensitive' } },
               { summary: { contains: query.search, mode: 'insensitive' } },
             ],
@@ -41,7 +47,23 @@ export class ProjectsService {
     return { data: data.map(projectView), meta: { page: query.page, limit: query.limit, total } };
   }
 
-  async get(id: string) {
+  listPublic(query: PublicListProjectsDto) {
+    return this.list(query, PublicationStatus.PUBLISHED);
+  }
+
+  listAdmin(query: ListProjectsDto) {
+    return this.list(query, query.status ? statusToDb(query.status) : undefined);
+  }
+
+  async getPublicBySlug(slug: string) {
+    const project = await this.prisma.project.findFirst({
+      where: { slug, status: PublicationStatus.PUBLISHED },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    return projectView(project);
+  }
+
+  async getAdmin(id: string) {
     const project = await this.prisma.project.findUnique({ where: { id } });
     if (!project) throw new NotFoundException('Project not found');
     return projectView(project);
@@ -72,7 +94,7 @@ export class ProjectsService {
   }
 
   async update(id: string, input: UpdateProjectDto, actorId?: string) {
-    await this.get(id);
+    await this.getAdmin(id);
     const { status, ...fields } = input;
     try {
       const project = await this.prisma.$transaction(async (tx) => {
@@ -100,7 +122,7 @@ export class ProjectsService {
   }
 
   async remove(id: string, actorId?: string) {
-    await this.get(id);
+    await this.getAdmin(id);
     await this.prisma.$transaction(async (tx) => {
       await tx.project.delete({ where: { id } });
       await tx.auditLog.create({

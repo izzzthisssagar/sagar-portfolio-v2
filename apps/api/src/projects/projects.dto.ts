@@ -21,11 +21,13 @@ export class CreateProjectDto {
   @IsInt() @Min(0) @Max(10_000) order!: number;
 }
 export class UpdateProjectDto extends PartialType(CreateProjectDto) {}
-export class ListProjectsDto {
+export class PublicListProjectsDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;
-  @IsOptional() @IsIn(PROJECT_STATUSES) status?: (typeof PROJECT_STATUSES)[number];
   @IsOptional() @IsString() @MaxLength(120) search?: string;
   @IsOptional() @IsIn(['order', 'title', 'createdAt']) sort = 'order';
   @IsOptional() @IsIn(['asc', 'desc']) direction: 'asc' | 'desc' = 'asc';
+}
+export class ListProjectsDto extends PublicListProjectsDto {
+  @IsOptional() @IsIn(PROJECT_STATUSES) status?: (typeof PROJECT_STATUSES)[number];
 }

@@ -25,6 +25,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://portfolio:ci-only-password@localhost:5432/sagar_portfolio_test?schema=public
       ACCESS_TOKEN_SECRET: ci-only-access-token-secret-at-least-32-chars
+      ACCESS_TOKEN_ISSUER: sagar-portfolio-api-ci
+      ACCESS_TOKEN_AUDIENCE: sagar-portfolio-cms-ci
       REFRESH_TOKEN_SECRET: ci-only-refresh-token-secret-at-least-32-chars
     steps:
       - uses: actions/checkout@v4
@@ -44,5 +46,5 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - run: pnpm audit --audit-level high
-      - name: Secret scanning guidance
+      - name: Tracked .env file check
         run: test -f .env.example && ! git ls-files | grep -E '(^|/)\.env$'

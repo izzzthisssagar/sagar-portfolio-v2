@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { SignJWT } from 'jose';
+import { jwtTestConfig } from '../../playwright.config';
 
 const publicRoutes = [
   '/',
@@ -46,4 +48,37 @@ test('unauthenticated admin routes redirect without exposing CMS navigation', as
   await page.goto('/admin/dashboard');
   await expect(page).toHaveURL(/\/admin\/login/);
   await expect(page.getByRole('navigation', { name: 'Admin' })).toHaveCount(0);
+});
+test('invalid admin cookie redirects and never renders CMS navigation', async ({
+  context,
+  page,
+}) => {
+  await context.addCookies([
+    {
+      name: 'portfolio_access',
+      value: 'arbitrary-cookie',
+      domain: '127.0.0.1',
+      path: '/',
+      httpOnly: true,
+    },
+  ]);
+  await page.goto('/admin/dashboard');
+  await expect(page).toHaveURL(/\/admin\/login/);
+  await expect(page.getByRole('navigation', { name: 'Admin' })).toHaveCount(0);
+});
+test('valid administrator JWT permits the CMS shell', async ({ context, page }) => {
+  const token = await new SignJWT({ role: 'admin' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject('playwright-admin')
+    .setIssuer(jwtTestConfig.accessIssuer)
+    .setAudience(jwtTestConfig.accessAudience)
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .sign(new TextEncoder().encode(jwtTestConfig.accessSecret));
+  await context.addCookies([
+    { name: 'portfolio_access', value: token, domain: '127.0.0.1', path: '/', httpOnly: true },
+  ]);
+  await page.goto('/admin/dashboard');
+  await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  await expect(page.getByRole('navigation', { name: 'Admin' })).toBeVisible();
 });

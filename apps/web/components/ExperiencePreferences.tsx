@@ -18,6 +18,29 @@ interface Preferences {
 }
 const STORAGE_KEY = 'portfolio-experience-preferences-v1';
 const Context = createContext<Preferences | null>(null);
+interface StoredPreferences {
+  sound: boolean;
+  motion: MotionPreference;
+  quality: QualityPreference;
+}
+export function parseStoredPreferences(raw: string | null): StoredPreferences | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    if (
+      typeof record.sound !== 'boolean' ||
+      !['auto', 'reduced'].includes(record.motion as string) ||
+      !['auto', 'high', 'medium', 'low'].includes(record.quality as string)
+    ) {
+      return null;
+    }
+    return record as unknown as StoredPreferences;
+  } catch {
+    return null;
+  }
+}
 
 export function ExperiencePreferencesProvider({ children }: { children: React.ReactNode }) {
   const [sound, setSound] = useState(false);
@@ -27,17 +50,15 @@ export function ExperiencePreferencesProvider({ children }: { children: React.Re
   const [systemReducedMotion, setSystemReducedMotion] = useState(false);
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const value = JSON.parse(saved) as Pick<Preferences, 'sound' | 'motion' | 'quality'>;
-        queueMicrotask(() => {
-          setSound(Boolean(value.sound));
-          setMotion(value.motion);
-          setQuality(value.quality);
-        });
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-      }
+    const value = parseStoredPreferences(saved);
+    if (value) {
+      queueMicrotask(() => {
+        setSound(value.sound);
+        setMotion(value.motion);
+        setQuality(value.quality);
+      });
+    } else if (saved) {
+      localStorage.removeItem(STORAGE_KEY);
     }
     const query = matchMedia('(prefers-reduced-motion: reduce)');
     const update = () => setSystemReducedMotion(query.matches);

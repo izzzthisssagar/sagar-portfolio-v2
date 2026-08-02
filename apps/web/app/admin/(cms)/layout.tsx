@@ -1,11 +1,13 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { verifyAdminAccessToken } from '@/lib/admin-auth.server';
 
 const links = ['dashboard', 'projects', 'posts', 'linkedin', 'game', 'media', 'settings'];
 export default async function AuthenticatedCmsLayout({ children }: { children: React.ReactNode }) {
   const session = (await cookies()).get('portfolio_access');
-  if (!session?.value) redirect('/admin/login?returnTo=/admin/dashboard');
+  const claims = await verifyAdminAccessToken(session?.value);
+  if (!claims) redirect('/admin/login?returnTo=/admin/dashboard');
   return (
     <div className="admin-shell">
       <aside className="admin-nav">

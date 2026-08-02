@@ -10,6 +10,7 @@ const fakePrisma = {
     findMany: () => Promise.resolve([]),
     count: () => Promise.resolve(0),
     findUnique: () => Promise.resolve(null),
+    findFirst: () => Promise.resolve(null),
   },
   $transaction: (operations: Promise<unknown>[]) => Promise.all(operations),
 };
@@ -40,7 +41,7 @@ describe('API v1 contracts', () => {
   });
   it('rejects unauthenticated project mutation without a bypass token', () =>
     request(app.getHttpServer())
-      .post('/api/v1/projects')
+      .post('/api/v1/admin/projects')
       .send({
         title: 'Test Project',
         slug: 'test-project',
@@ -55,5 +56,5 @@ describe('API v1 contracts', () => {
       .send({ email: 'not-email', password: 'short' })
       .expect(400));
   it('rejects unauthenticated project updates', () =>
-    request(app.getHttpServer()).patch('/api/v1/projects/id').send({ order: 2 }).expect(401));
+    request(app.getHttpServer()).patch('/api/v1/admin/projects/id').send({ order: 2 }).expect(401));
 });

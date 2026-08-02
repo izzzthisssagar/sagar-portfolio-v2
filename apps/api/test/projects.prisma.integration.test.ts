@@ -29,7 +29,7 @@ databaseSuite('Projects Prisma integration', () => {
     id = created.id;
     expect(
       (
-        await service.list({
+        await service.listAdmin({
           page: 1,
           limit: 10,
           status: 'draft',
