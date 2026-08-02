@@ -31,9 +31,13 @@ async function token(
   return builder.sign(new TextEncoder().encode(options.signingSecret ?? secret));
 }
 
-function request(cookie?: string) {
+function request(cookie?: string, extraCookies?: Record<string, string>) {
+  const cookieParts = [
+    ...(cookie ? [`portfolio_access=${cookie}`] : []),
+    ...Object.entries(extraCookies ?? {}).map(([name, value]) => `${name}=${value}`),
+  ];
   return new NextRequest('http://localhost:3000/admin/dashboard', {
-    ...(cookie ? { headers: { cookie: `portfolio_access=${cookie}` } } : {}),
+    ...(cookieParts.length ? { headers: { cookie: cookieParts.join('; ') } } : {}),
   });
 }
 
@@ -89,5 +93,53 @@ describe('admin proxy JWT boundary', () => {
     const response = await proxy(request(await token()));
     expect(response.status).toBe(200);
     expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('silently refreshes an expired access token using the refresh cookie', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: [['set-cookie', 'portfolio_access=new-token; Path=/; HttpOnly']],
+      }),
+    );
+    const { proxy } = await import('./proxy');
+    const response = await proxy(
+      request(await token({ expiresAt: Math.floor(Date.now() / 1000) - 60 }), {
+        portfolio_refresh: 'a-refresh-token',
+        portfolio_csrf: 'a-csrf-token',
+      }),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/refresh'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    fetchSpy.mockRestore();
+  });
+
+  it('redirects to login when the silent refresh attempt fails', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }));
+    const { proxy } = await import('./proxy');
+    const response = await proxy(
+      request(await token({ expiresAt: Math.floor(Date.now() / 1000) - 60 }), {
+        portfolio_refresh: 'a-stale-refresh-token',
+        portfolio_csrf: 'a-csrf-token',
+      }),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/admin/login');
+    fetchSpy.mockRestore();
+  });
+
+  it('redirects to login without attempting a refresh when no refresh cookie exists', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const { proxy } = await import('./proxy');
+    const response = await proxy(
+      request(await token({ expiresAt: Math.floor(Date.now() / 1000) - 60 })),
+    );
+    expect(response.status).toBe(307);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
