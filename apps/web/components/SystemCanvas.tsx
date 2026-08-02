@@ -1,8 +1,12 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { QUALITY_PROFILES } from '@portfolio/three';
 import type { SystemSceneState } from '@portfolio/types';
-const Scene = dynamic(() => import('./SystemScene').then((m) => m.SystemScene), { ssr: false });
+import { useExperiencePreferences } from './ExperiencePreferences';
+const Scene = dynamic(() => import('./SystemScene').then((module) => module.SystemScene), {
+  ssr: false,
+});
 export function StaticSystemFallback({ reason = 'Static diagnostic view' }: { reason?: string }) {
   return (
     <div
@@ -19,6 +23,8 @@ export function StaticSystemFallback({ reason = 'Static diagnostic view' }: { re
 }
 export function SystemCanvas({ state = 'sealed' }: { state?: SystemSceneState }) {
   const [available, setAvailable] = useState<boolean | null>(null);
+  const { effectiveQuality, effectiveReducedMotion, degrade } = useExperiencePreferences();
+  const slowFrames = useRef(0);
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       try {
@@ -30,15 +36,41 @@ export function SystemCanvas({ state = 'sealed' }: { state?: SystemSceneState })
     });
     return () => cancelAnimationFrame(frame);
   }, []);
-  if (available !== true)
+  useEffect(() => {
+    if (!available || effectiveReducedMotion) return;
+    let previous = performance.now();
+    let frame = 0;
+    const monitor = (now: number) => {
+      if (now - previous > 42) slowFrames.current += 1;
+      else slowFrames.current = Math.max(0, slowFrames.current - 1);
+      if (slowFrames.current > 45) {
+        degrade();
+        slowFrames.current = 0;
+      }
+      previous = now;
+      frame = requestAnimationFrame(monitor);
+    };
+    frame = requestAnimationFrame(monitor);
+    return () => cancelAnimationFrame(frame);
+  }, [available, effectiveReducedMotion, degrade]);
+  if (available !== true || effectiveQuality === 'poster')
     return (
       <StaticSystemFallback
         reason={
           available === false
             ? 'WebGL unavailable — static system map'
-            : 'Preparing diagnostic view'
+            : effectiveQuality === 'poster'
+              ? 'Performance fallback — static system map'
+              : 'Preparing diagnostic view'
         }
       />
     );
-  return <Scene state={state} />;
+  return (
+    <Scene
+      state={state}
+      profile={QUALITY_PROFILES[effectiveQuality]}
+      reducedMotion={effectiveReducedMotion}
+      onContextLost={() => setAvailable(false)}
+    />
+  );
 }

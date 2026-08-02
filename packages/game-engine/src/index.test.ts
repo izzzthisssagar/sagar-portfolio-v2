@@ -22,4 +22,18 @@ describe('QA Rift engine', () => {
   });
   it('never exceeds challenge maximum', () =>
     expect(scoreChallenge(challenge, true, 0, 99)).toBe(200));
+  it('does not reward invalid time and clamps negative elapsed time', () => {
+    expect(scoreChallenge(challenge, true, Number.NaN, 0)).toBe(0);
+    expect(scoreChallenge(challenge, true, -10, 0)).toBe(scoreChallenge(challenge, true, 0, 0));
+  });
+  it('ignores completion outside active play', () => {
+    expect(
+      gameReducer(initialGameState, {
+        type: 'COMPLETE',
+        correct: true,
+        elapsedSeconds: 1,
+        challenge,
+      }),
+    ).toEqual(initialGameState);
+  });
 });

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { SiteHeader } from '@/components/SiteHeader';
+import { ExperiencePreferencesProvider } from '@/components/ExperiencePreferences';
 export const metadata: Metadata = {
   title: { default: 'Sagar Thapa / Quality Engineer', template: '%s / Sagar Thapa' },
   description:
@@ -18,8 +19,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a className="skip" href="#main">
           Skip to content
         </a>
-        <SiteHeader />
-        {children}
+        <ExperiencePreferencesProvider>
+          <SiteHeader />
+          {children}
+        </ExperiencePreferencesProvider>
       </body>
     </html>
   );

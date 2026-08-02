@@ -33,7 +33,8 @@ export function scoreChallenge(
   elapsedSeconds: number,
   streak: number,
 ): number {
-  if (!correct) return 0;
+  if (!correct || !Number.isFinite(elapsedSeconds)) return 0;
+  elapsedSeconds = Math.max(0, elapsedSeconds);
   const calm = challenge.timeLimitSeconds === undefined;
   const timeBonus = calm ? 0 : Math.max(0, (challenge.timeLimitSeconds ?? 0) - elapsedSeconds);
   return Math.min(challenge.maxScore, 100 + timeBonus * 2 + Math.min(streak, 5) * 20);
