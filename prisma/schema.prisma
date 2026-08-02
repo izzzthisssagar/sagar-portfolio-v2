@@ -124,6 +124,9 @@ model Project {
   fixAndRetest     String?
   outcome          String?
   lessons          String?
+  liveUrl          String?
+  githubUrl        String?
+  labels           String[]          @default([])
   sceneState       String            @default("inspection")
   status           PublicationStatus @default(DRAFT)
   order            Int               @default(0)

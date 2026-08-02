@@ -1,12 +1,14 @@
 import { OmitType, PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
   Max,
   MaxLength,
@@ -39,6 +41,9 @@ export class CreateProjectDto {
   @IsOptional() @IsString() @MaxLength(6000) fixAndRetest?: string;
   @IsOptional() @IsString() @MaxLength(6000) outcome?: string;
   @IsOptional() @IsString() @MaxLength(6000) lessons?: string;
+  @IsOptional() @IsUrl({ protocols: ['https', 'http'] }) @MaxLength(500) liveUrl?: string;
+  @IsOptional() @IsUrl({ protocols: ['https', 'http'] }) @MaxLength(500) githubUrl?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) labels?: string[];
   @IsOptional() @IsIn(SCENE_STATES) sceneState?: (typeof SCENE_STATES)[number];
   @IsIn(PROJECT_STATUSES) status!: (typeof PROJECT_STATUSES)[number];
   @IsInt() @Min(0) @Max(10_000) order!: number;
