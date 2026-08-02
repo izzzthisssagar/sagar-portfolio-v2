@@ -19,11 +19,14 @@ function clientIp(request: Request): string | undefined {
   return request.ip;
 }
 
-function issueSession(response: Response, tokens: {
-  accessToken: string;
-  refreshToken: string;
-  admin: { id: string; email: string };
-}) {
+function issueSession(
+  response: Response,
+  tokens: {
+    accessToken: string;
+    refreshToken: string;
+    admin: { id: string; email: string };
+  },
+) {
   const csrfToken = randomBytes(24).toString('base64url');
   setAccessCookie(response, tokens.accessToken);
   setRefreshCookie(response, tokens.refreshToken);
@@ -41,7 +44,11 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @UseGuards(CsrfGuard)
   @SkipCsrfToken()
-  async login(@Body() body: LoginDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+  async login(
+    @Body() body: LoginDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     const tokens = await this.auth.login(body.email, body.password, clientIp(request));
     return issueSession(response, tokens);
   }

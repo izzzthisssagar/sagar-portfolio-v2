@@ -77,7 +77,9 @@ test.describe('CMS project workflow', () => {
     await page.goto('/admin/projects/new');
     await page.getByLabel('Title').fill(title);
     await page.getByLabel('Slug').fill(slug);
-    await page.locator('#field-summary').fill('The original automated end-to-end test project summary.');
+    await page
+      .locator('#field-summary')
+      .fill('The original automated end-to-end test project summary.');
     await page.getByRole('button', { name: 'CREATE PROJECT' }).click();
     await expect(page).toHaveURL(/\/admin\/projects\/(?!new$)[a-z0-9]+$/);
 

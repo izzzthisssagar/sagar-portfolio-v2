@@ -110,7 +110,12 @@ export class AuthService {
       throw new InvalidCredentialsException();
     }
 
-    if (!canAttemptLogin({ failedLoginCount: admin.failedLoginCount, lockedUntil: admin.lockedUntil }, now)) {
+    if (
+      !canAttemptLogin(
+        { failedLoginCount: admin.failedLoginCount, lockedUntil: admin.lockedUntil },
+        now,
+      )
+    ) {
       await this.audit('LOGIN_LOCKED', admin.id, ip);
       throw new AccountLockedException(admin.lockedUntil!);
     }

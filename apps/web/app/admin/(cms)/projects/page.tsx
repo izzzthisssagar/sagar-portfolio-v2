@@ -87,9 +87,12 @@ export default async function ProjectsPage({
           <nav aria-label="Project pagination" className="pagination">
             {page > 1 && <Link href={pageHref(page - 1)}>PREVIOUS</Link>}
             <span>
-              Page {result.meta.page} · {result.meta.total} project{result.meta.total === 1 ? '' : 's'}
+              Page {result.meta.page} · {result.meta.total} project
+              {result.meta.total === 1 ? '' : 's'}
             </span>
-            {page * result.meta.limit < result.meta.total && <Link href={pageHref(page + 1)}>NEXT</Link>}
+            {page * result.meta.limit < result.meta.total && (
+              <Link href={pageHref(page + 1)}>NEXT</Link>
+            )}
           </nav>
         </>
       )}

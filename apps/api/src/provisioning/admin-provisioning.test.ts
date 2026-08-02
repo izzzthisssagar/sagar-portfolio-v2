@@ -53,9 +53,9 @@ databaseSuite('admin provisioning', () => {
   });
 
   it('rejects a weak password before touching the database', async () => {
-    await expect(
-      provisionAdmin({ prisma, email, password: 'short1' }),
-    ).rejects.toBeInstanceOf(WeakPasswordError);
+    await expect(provisionAdmin({ prisma, email, password: 'short1' })).rejects.toBeInstanceOf(
+      WeakPasswordError,
+    );
     expect(await prisma.adminUser.count()).toBe(0);
   });
 });

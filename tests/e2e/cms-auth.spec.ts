@@ -17,7 +17,9 @@ test.describe('CMS authentication', () => {
     await expect(page).toHaveURL(/\/admin\/dashboard$/);
   });
 
-  test('rejects an invalid password with a generic message and no enumeration', async ({ page }) => {
+  test('rejects an invalid password with a generic message and no enumeration', async ({
+    page,
+  }) => {
     await page.goto('/admin/login');
     await page.getByLabel('Email').fill(TEST_ADMIN_EMAIL);
     await page.getByLabel('Password').fill('definitely-the-wrong-password-123');
@@ -60,7 +62,9 @@ test.describe('CMS authentication', () => {
     await loginViaUI(page);
     const results = await new AxeBuilder({ page }).analyze();
     expect(
-      results.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? '')),
+      results.violations.filter((violation) =>
+        ['critical', 'serious'].includes(violation.impact ?? ''),
+      ),
     ).toEqual([]);
   });
 });

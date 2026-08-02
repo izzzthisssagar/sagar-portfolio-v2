@@ -12,9 +12,7 @@ const base = {
 
 describe('publication readiness rules', () => {
   it('requires an overview', () => {
-    expect(validateForPublication({ ...base, overview: null })).toContain(
-      'Overview is required.',
-    );
+    expect(validateForPublication({ ...base, overview: null })).toContain('Overview is required.');
   });
   it('requires responsibilities or test strategy', () => {
     expect(validateForPublication(base)).toContain(

@@ -50,7 +50,9 @@ export class CreateProjectDto {
 }
 
 /** Status is intentionally excluded — only the workflow endpoint may transition it. */
-export class UpdateProjectDto extends PartialType(OmitType(CreateProjectDto, ['status'] as const)) {}
+export class UpdateProjectDto extends PartialType(
+  OmitType(CreateProjectDto, ['status'] as const),
+) {}
 
 export class ProjectWorkflowDto {
   @IsIn(WORKFLOW_TRANSITIONS) transition!: WorkflowTransition;

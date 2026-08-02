@@ -22,7 +22,8 @@ const qaMastery = {
   responsibilities:
     'Product vision, requirements, architecture decisions, testing direction, iterative ' +
     'evaluation, and release decisions.',
-  systemMap: 'Platform / Curriculum / Interactive Widgets / Automated Grading / BuggyShop / BuggyAPI / AI Tutor / Supabase / CI / Release Gate',
+  systemMap:
+    'Platform / Curriculum / Interactive Widgets / Automated Grading / BuggyShop / BuggyAPI / AI Tutor / Supabase / CI / Release Gate',
   liveUrl: 'https://qa-mastery-platform.vercel.app/',
   githubUrl: 'https://github.com/izzzthisssagar/qa-mastery',
   labels: [
@@ -78,7 +79,10 @@ const numazuHalalFood = {
   ],
 };
 
-async function seedProject(prisma: PrismaService, input: typeof qaMastery | typeof numazuHalalFood) {
+async function seedProject(
+  prisma: PrismaService,
+  input: typeof qaMastery | typeof numazuHalalFood,
+) {
   const { metrics, findings, ...projectFields } = input;
   await prisma.$transaction(async (tx) => {
     const project = await tx.project.upsert({

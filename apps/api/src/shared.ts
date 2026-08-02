@@ -21,7 +21,9 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
         ? raw
         : ((raw as { message?: string | string[] }).message ?? 'Request failed');
     const code =
-      typeof raw === 'object' && raw !== null && typeof (raw as { code?: unknown }).code === 'string'
+      typeof raw === 'object' &&
+      raw !== null &&
+      typeof (raw as { code?: unknown }).code === 'string'
         ? (raw as { code: string }).code
         : `HTTP_${status}`;
     response.status(status).json({ error: { code, message, requestId: randomUUID() } });

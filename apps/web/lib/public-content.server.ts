@@ -2,7 +2,9 @@ import 'server-only';
 import type { ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
 import { projects as fallbackProjects } from './content';
 
-const API_URL = process.env.API_URL ? `${process.env.API_URL}/api/v1` : 'http://localhost:4000/api/v1';
+const API_URL = process.env.API_URL
+  ? `${process.env.API_URL}/api/v1`
+  : 'http://localhost:4000/api/v1';
 
 async function publicFetch<T>(path: string): Promise<T | null> {
   try {
@@ -34,9 +36,13 @@ export async function getPublishedProjectBySlug(slug: string): Promise<ProjectDe
   const data = await publicFetch<ProjectDetailRecord>(`/projects/${slug}`);
   if (data) return data;
   if (process.env.NODE_ENV !== 'production') {
-    const fallback = fallbackProjects.find((project) => project.slug === slug && project.status === 'published');
+    const fallback = fallbackProjects.find(
+      (project) => project.slug === slug && project.status === 'published',
+    );
     if (fallback) {
-      console.warn(`[public-content] API unavailable — using local development fallback for "${slug}".`);
+      console.warn(
+        `[public-content] API unavailable — using local development fallback for "${slug}".`,
+      );
       return { ...fallback, findings: [] };
     }
   }

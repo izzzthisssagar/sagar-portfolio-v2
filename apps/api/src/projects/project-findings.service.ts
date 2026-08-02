@@ -69,7 +69,10 @@ export class ProjectFindingsService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const finding = await tx.projectFinding.update({
         where: { id: findingId },
-        data: { ...rest, ...(evidenceStatus ? { evidenceStatus: evidenceToDb(evidenceStatus) } : {}) },
+        data: {
+          ...rest,
+          ...(evidenceStatus ? { evidenceStatus: evidenceToDb(evidenceStatus) } : {}),
+        },
       });
       await tx.auditLog.create({
         data: {

@@ -65,7 +65,10 @@ export interface AdminSession {
 
 export const auth = {
   login: (email: string, password: string) =>
-    apiFetch<{ email: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+    apiFetch<{ email: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
   refresh: () => apiFetch<{ email: string }>('/auth/refresh', { method: 'POST' }),
   logout: () => apiFetch<void>('/auth/logout', { method: 'POST' }),
   logoutAll: () => apiFetch<void>('/auth/logout-all', { method: 'POST' }),
@@ -186,13 +189,17 @@ export const projects = {
   create: (input: ProjectInput & { status: AdminProject['status'] }) =>
     apiFetch<AdminProject>('/admin/projects', { method: 'POST', body: JSON.stringify(input) }),
   update: (id: string, input: Partial<ProjectInput>) =>
-    apiFetch<AdminProject>(`/admin/projects/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    apiFetch<AdminProject>(`/admin/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
   transition: (id: string, transition: 'draft' | 'review' | 'publish' | 'archive') =>
     apiFetch<AdminProject>(`/admin/projects/${id}/workflow`, {
       method: 'POST',
       body: JSON.stringify({ transition }),
     }),
-  remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/projects/${id}`, { method: 'DELETE' }),
+  remove: (id: string) =>
+    apiFetch<{ deleted: true }>(`/admin/projects/${id}`, { method: 'DELETE' }),
 
   metrics: {
     list: (projectId: string) => apiFetch<AdminMetric[]>(`/admin/projects/${projectId}/metrics`),

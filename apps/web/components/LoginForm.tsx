@@ -69,7 +69,11 @@ export function LoginForm({ returnTo }: { returnTo: string }) {
           aria-invalid={status === 'invalid' || undefined}
         />
       </div>
-      <p role="status" aria-live="polite" className={feedback ? `login-feedback login-feedback--${status}` : 'login-feedback'}>
+      <p
+        role="status"
+        aria-live="polite"
+        className={feedback ? `login-feedback login-feedback--${status}` : 'login-feedback'}
+      >
         {feedback}
       </p>
       <button className="button primary" type="submit" aria-busy={isLoading} disabled={isLoading}>

@@ -9,7 +9,9 @@ import type {
   ProjectListResult,
 } from './admin-api.client';
 
-const API_URL = process.env.API_URL ? `${process.env.API_URL}/api/v1` : 'http://localhost:4000/api/v1';
+const API_URL = process.env.API_URL
+  ? `${process.env.API_URL}/api/v1`
+  : 'http://localhost:4000/api/v1';
 
 async function adminFetchRaw(path: string): Promise<unknown | null> {
   const accessToken = (await cookies()).get('portfolio_access')?.value;

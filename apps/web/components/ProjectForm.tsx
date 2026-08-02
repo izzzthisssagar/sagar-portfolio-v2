@@ -10,9 +10,22 @@ import {
 } from '@/lib/project-form-validation';
 import { slugify } from '@/lib/slugify';
 
-const SCENE_STATES = ['sealed', 'exploded', 'mastery', 'inspection', 'fault', 'verified', 'rift'] as const;
+const SCENE_STATES = [
+  'sealed',
+  'exploded',
+  'mastery',
+  'inspection',
+  'fault',
+  'verified',
+  'rift',
+] as const;
 
-const TEXT_FIELDS: { key: keyof ProjectFormValues; label: string; help?: string; long?: boolean }[] = [
+const TEXT_FIELDS: {
+  key: keyof ProjectFormValues;
+  label: string;
+  help?: string;
+  long?: boolean;
+}[] = [
   { key: 'overview', label: 'Overview', long: true },
   { key: 'context', label: 'Context', long: true },
   { key: 'responsibilities', label: 'Responsibilities', long: true },
@@ -44,7 +57,13 @@ function toFormValues(project: AdminProject | undefined): ProjectFormValues {
   };
 }
 
-export function ProjectForm({ mode, project }: { mode: 'create' | 'edit'; project?: AdminProject }) {
+export function ProjectForm({
+  mode,
+  project,
+}: {
+  mode: 'create' | 'edit';
+  project?: AdminProject;
+}) {
   const router = useRouter();
   const [values, setValues] = useState<ProjectFormValues>(() => toFormValues(project));
   const [slugTouched, setSlugTouched] = useState(mode === 'edit');
@@ -73,7 +92,10 @@ export function ProjectForm({ mode, project }: { mode: 'create' | 'edit'; projec
     });
   }
 
-  const errorEntries = useMemo(() => Object.entries(errors) as [keyof ProjectFormValues, string][], [errors]);
+  const errorEntries = useMemo(
+    () => Object.entries(errors) as [keyof ProjectFormValues, string][],
+    [errors],
+  );
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -158,8 +180,8 @@ export function ProjectForm({ mode, project }: { mode: 'create' | 'edit'; projec
 
       {mode === 'edit' && project && (
         <p className="project-status-note">
-          Status: <strong>{project.status}</strong> — use the project list actions to change publication
-          status.
+          Status: <strong>{project.status}</strong> — use the project list actions to change
+          publication status.
         </p>
       )}
       {mode === 'create' && (
@@ -276,7 +298,11 @@ export function ProjectForm({ mode, project }: { mode: 'create' | 'edit'; projec
 
       <div className="field">
         <label htmlFor="field-labels">Architecture labels (comma-separated)</label>
-        <input id="field-labels" value={values.labels} onChange={(event) => set('labels', event.target.value)} />
+        <input
+          id="field-labels"
+          value={values.labels}
+          onChange={(event) => set('labels', event.target.value)}
+        />
       </div>
 
       <div className="field">

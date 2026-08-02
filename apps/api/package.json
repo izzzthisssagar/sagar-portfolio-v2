@@ -6,7 +6,7 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main.js",
-    "lint": "eslint src test --max-warnings=0",
+    "lint": "eslint src test scripts --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

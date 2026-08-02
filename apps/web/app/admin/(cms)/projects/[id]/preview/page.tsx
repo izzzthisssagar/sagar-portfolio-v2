@@ -8,7 +8,18 @@ export function generateMetadata(): Metadata {
   return { robots: { index: false, follow: false } };
 }
 
-const SECTIONS: { key: 'overview' | 'context' | 'responsibilities' | 'systemMap' | 'testStrategy' | 'fixAndRetest' | 'outcome' | 'lessons'; label: string }[] = [
+const SECTIONS: {
+  key:
+    | 'overview'
+    | 'context'
+    | 'responsibilities'
+    | 'systemMap'
+    | 'testStrategy'
+    | 'fixAndRetest'
+    | 'outcome'
+    | 'lessons';
+  label: string;
+}[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'context', label: 'Context' },
   { key: 'responsibilities', label: 'Responsibilities' },

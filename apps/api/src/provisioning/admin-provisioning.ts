@@ -7,7 +7,9 @@ export class InvalidEmailError extends Error {}
 export class WeakPasswordError extends Error {}
 export class AdminAlreadyExistsError extends Error {
   constructor() {
-    super('An administrator already exists. Single-administrator systems cannot be re-provisioned.');
+    super(
+      'An administrator already exists. Single-administrator systems cannot be re-provisioned.',
+    );
   }
 }
 
@@ -52,7 +54,12 @@ export async function provisionAdmin({
     data: { email: normalized, passwordHash },
   });
   await prisma.auditLog.create({
-    data: { action: 'ADMIN_CREATED', resource: 'AdminUser', resourceId: admin.id, actorId: admin.id },
+    data: {
+      action: 'ADMIN_CREATED',
+      resource: 'AdminUser',
+      resourceId: admin.id,
+      actorId: admin.id,
+    },
   });
   return { id: admin.id, email: admin.email };
 }

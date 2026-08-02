@@ -46,11 +46,11 @@ compromised. Refresh sessions live `REFRESH_TOKEN_TTL_DAYS` (default 7) days.
 
 ## Cookies
 
-| Cookie | Path | HttpOnly | Contents |
-|---|---|---|---|
-| `portfolio_access` | `/` | yes | the access JWT |
-| `portfolio_refresh` | `/api/v1/auth` | yes | the raw refresh token |
-| `portfolio_csrf` | `/` | **no** | a random double-submit value |
+| Cookie              | Path           | HttpOnly | Contents                     |
+| ------------------- | -------------- | -------- | ---------------------------- |
+| `portfolio_access`  | `/`            | yes      | the access JWT               |
+| `portfolio_refresh` | `/api/v1/auth` | yes      | the raw refresh token        |
+| `portfolio_csrf`    | `/`            | **no**   | a random double-submit value |
 
 All three are `SameSite=Strict`, `Secure` in production. `portfolio_csrf` is deliberately
 JS-readable — double-submit tokens are not secrets, the cookie/header pairing is the defense (see

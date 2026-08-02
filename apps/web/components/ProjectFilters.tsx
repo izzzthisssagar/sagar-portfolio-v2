@@ -15,7 +15,13 @@ export function ProjectFilters({
     <form method="get" className="project-filters" role="search" aria-label="Filter projects">
       <div className="field">
         <label htmlFor="search">Search</label>
-        <input id="search" name="search" type="search" defaultValue={search} placeholder="Title or slug" />
+        <input
+          id="search"
+          name="search"
+          type="search"
+          defaultValue={search}
+          placeholder="Title or slug"
+        />
       </div>
       <div className="field">
         <label htmlFor="status">Status</label>

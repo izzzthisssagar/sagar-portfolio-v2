@@ -119,7 +119,9 @@ describe('admin proxy JWT boundary', () => {
   });
 
   it('redirects to login when the silent refresh attempt fails', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 401 }));
     const { proxy } = await import('./proxy');
     const response = await proxy(
       request(await token({ expiresAt: Math.floor(Date.now() / 1000) - 60 }), {

@@ -57,7 +57,7 @@ the public API never signals "this exists but isn't public yet."
 ## Draft preview
 
 `/admin/projects/:id/preview` (Next.js, inside the authenticated CMS layout) renders a project
-regardless of status by calling the *admin* API (`GET /admin/projects/:id`, guarded) — it never
+regardless of status by calling the _admin_ API (`GET /admin/projects/:id`, guarded) — it never
 touches the public API or public routes, carries a visible "DRAFT PREVIEW" banner, sets
 `noindex, nofollow` and `Cache-Control: no-store`, and performs no mutation. Because it's served
 under `/admin/*`, the existing session guard (`docs/authentication.md`) already keeps it behind

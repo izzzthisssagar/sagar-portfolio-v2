@@ -13,9 +13,20 @@ interface FindingDraft {
   severity: (typeof SEVERITY_OPTIONS)[number];
   evidenceStatus: AdminFinding['evidenceStatus'];
 }
-const emptyDraft: FindingDraft = { title: '', summary: '', severity: 'Medium', evidenceStatus: 'pending' };
+const emptyDraft: FindingDraft = {
+  title: '',
+  summary: '',
+  severity: 'Medium',
+  evidenceStatus: 'pending',
+};
 
-export function FindingsEditor({ projectId, initial }: { projectId: string; initial: AdminFinding[] }) {
+export function FindingsEditor({
+  projectId,
+  initial,
+}: {
+  projectId: string;
+  initial: AdminFinding[];
+}) {
   const [findings, setFindings] = useState(initial);
   const [draft, setDraft] = useState<FindingDraft>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +58,10 @@ export function FindingsEditor({ projectId, initial }: { projectId: string; init
     }
   }
 
-  async function updateEvidence(finding: AdminFinding, evidenceStatus: AdminFinding['evidenceStatus']) {
+  async function updateEvidence(
+    finding: AdminFinding,
+    evidenceStatus: AdminFinding['evidenceStatus'],
+  ) {
     await projects.findings.update(projectId, finding.id, { evidenceStatus });
     await refresh();
   }
@@ -64,7 +78,10 @@ export function FindingsEditor({ projectId, initial }: { projectId: string; init
     if (swapIndex < 0 || swapIndex >= next.length) return;
     [next[index], next[swapIndex]] = [next[swapIndex]!, next[index]!];
     setFindings(next);
-    await projects.findings.reorder(projectId, next.map((f) => f.id));
+    await projects.findings.reorder(
+      projectId,
+      next.map((f) => f.id),
+    );
   }
 
   return (
@@ -99,7 +116,12 @@ export function FindingsEditor({ projectId, initial }: { projectId: string; init
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={() => move(index, -1)} disabled={index === 0} aria-label={`Move ${finding.title} up`}>
+              <button
+                type="button"
+                onClick={() => move(index, -1)}
+                disabled={index === 0}
+                aria-label={`Move ${finding.title} up`}
+              >
                 ↑
               </button>
               <button
@@ -121,7 +143,11 @@ export function FindingsEditor({ projectId, initial }: { projectId: string; init
       <form onSubmit={addFinding} className="nested-form">
         <div className="field">
           <label htmlFor="finding-title">Title</label>
-          <input id="finding-title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+          <input
+            id="finding-title"
+            value={draft.title}
+            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+          />
         </div>
         <div className="field">
           <label htmlFor="finding-summary">Summary</label>
@@ -137,7 +163,9 @@ export function FindingsEditor({ projectId, initial }: { projectId: string; init
           <select
             id="finding-severity"
             value={draft.severity}
-            onChange={(e) => setDraft({ ...draft, severity: e.target.value as (typeof SEVERITY_OPTIONS)[number] })}
+            onChange={(e) =>
+              setDraft({ ...draft, severity: e.target.value as (typeof SEVERITY_OPTIONS)[number] })
+            }
           >
             {SEVERITY_OPTIONS.map((option) => (
               <option key={option} value={option}>
@@ -151,7 +179,12 @@ export function FindingsEditor({ projectId, initial }: { projectId: string; init
           <select
             id="finding-evidence"
             value={draft.evidenceStatus}
-            onChange={(e) => setDraft({ ...draft, evidenceStatus: e.target.value as AdminFinding['evidenceStatus'] })}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                evidenceStatus: e.target.value as AdminFinding['evidenceStatus'],
+              })
+            }
           >
             {EVIDENCE_OPTIONS.map((option) => (
               <option key={option} value={option}>

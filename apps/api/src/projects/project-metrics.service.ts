@@ -58,7 +58,12 @@ export class ProjectMetricsService {
     return metricView(created);
   }
 
-  async update(projectId: string, metricId: string, input: UpdateProjectMetricDto, actorId?: string) {
+  async update(
+    projectId: string,
+    metricId: string,
+    input: UpdateProjectMetricDto,
+    actorId?: string,
+  ) {
     await this.findOwned(projectId, metricId);
     const { evidence, ...rest } = input;
     const updated = await this.prisma.$transaction(async (tx) => {

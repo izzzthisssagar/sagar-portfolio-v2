@@ -14,7 +14,13 @@ interface MetricDraft {
 }
 const emptyDraft: MetricDraft = { label: '', value: '', evidence: 'pending', sourceNote: '' };
 
-export function MetricsEditor({ projectId, initial }: { projectId: string; initial: AdminMetric[] }) {
+export function MetricsEditor({
+  projectId,
+  initial,
+}: {
+  projectId: string;
+  initial: AdminMetric[];
+}) {
   const [metrics, setMetrics] = useState(initial);
   const [draft, setDraft] = useState<MetricDraft>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +69,10 @@ export function MetricsEditor({ projectId, initial }: { projectId: string; initi
     if (swapIndex < 0 || swapIndex >= next.length) return;
     [next[index], next[swapIndex]] = [next[swapIndex]!, next[index]!];
     setMetrics(next);
-    await projects.metrics.reorder(projectId, next.map((m) => m.id));
+    await projects.metrics.reorder(
+      projectId,
+      next.map((m) => m.id),
+    );
   }
 
   return (
@@ -77,14 +86,18 @@ export function MetricsEditor({ projectId, initial }: { projectId: string; initi
           {metrics.map((metric, index) => (
             <li key={metric.id}>
               <strong>{metric.value}</strong> {metric.label}
-              <span className={`evidence-badge evidence-badge--${metric.evidence}`}>{metric.evidence}</span>
+              <span className={`evidence-badge evidence-badge--${metric.evidence}`}>
+                {metric.evidence}
+              </span>
               <label className="visually-hidden" htmlFor={`metric-evidence-${metric.id}`}>
                 Evidence status for {metric.label}
               </label>
               <select
                 id={`metric-evidence-${metric.id}`}
                 value={metric.evidence}
-                onChange={(event) => updateEvidence(metric, event.target.value as AdminMetric['evidence'])}
+                onChange={(event) =>
+                  updateEvidence(metric, event.target.value as AdminMetric['evidence'])
+                }
               >
                 {EVIDENCE_OPTIONS.map((option) => (
                   <option key={option} value={option}>
@@ -92,7 +105,12 @@ export function MetricsEditor({ projectId, initial }: { projectId: string; initi
                   </option>
                 ))}
               </select>
-              <button type="button" onClick={() => move(index, -1)} disabled={index === 0} aria-label={`Move ${metric.label} up`}>
+              <button
+                type="button"
+                onClick={() => move(index, -1)}
+                disabled={index === 0}
+                aria-label={`Move ${metric.label} up`}
+              >
                 ↑
               </button>
               <button
@@ -114,18 +132,28 @@ export function MetricsEditor({ projectId, initial }: { projectId: string; initi
       <form onSubmit={addMetric} className="nested-form">
         <div className="field">
           <label htmlFor="metric-label">Label</label>
-          <input id="metric-label" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+          <input
+            id="metric-label"
+            value={draft.label}
+            onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+          />
         </div>
         <div className="field">
           <label htmlFor="metric-value">Value</label>
-          <input id="metric-value" value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
+          <input
+            id="metric-value"
+            value={draft.value}
+            onChange={(e) => setDraft({ ...draft, value: e.target.value })}
+          />
         </div>
         <div className="field">
           <label htmlFor="metric-evidence">Evidence</label>
           <select
             id="metric-evidence"
             value={draft.evidence}
-            onChange={(e) => setDraft({ ...draft, evidence: e.target.value as AdminMetric['evidence'] })}
+            onChange={(e) =>
+              setDraft({ ...draft, evidence: e.target.value as AdminMetric['evidence'] })
+            }
           >
             {EVIDENCE_OPTIONS.map((option) => (
               <option key={option} value={option}>
@@ -136,7 +164,11 @@ export function MetricsEditor({ projectId, initial }: { projectId: string; initi
         </div>
         <div className="field">
           <label htmlFor="metric-source">Source note</label>
-          <input id="metric-source" value={draft.sourceNote} onChange={(e) => setDraft({ ...draft, sourceNote: e.target.value })} />
+          <input
+            id="metric-source"
+            value={draft.sourceNote}
+            onChange={(e) => setDraft({ ...draft, sourceNote: e.target.value })}
+          />
         </div>
         <button className="button" type="submit">
           ADD METRIC

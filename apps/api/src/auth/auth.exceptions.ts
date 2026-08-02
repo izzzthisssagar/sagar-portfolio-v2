@@ -1,4 +1,9 @@
-import { HttpException, HttpStatus, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 
 export class AccountLockedException extends HttpException {
   constructor(lockedUntil: Date) {

@@ -31,11 +31,20 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
     // AuditLog.actorId carries a real foreign key to AdminUser — the token's
     // subject must reference a row that exists, not an arbitrary id.
     const admin = await prisma.adminUser.create({
-      data: { email: adminEmail, passwordHash: await argon2.hash('Content-Contract-9!', { type: argon2.argon2id }) },
+      data: {
+        email: adminEmail,
+        passwordHash: await argon2.hash('Content-Contract-9!', { type: argon2.argon2id }),
+      },
     });
     adminToken = new JwtService().sign(
       { sub: admin.id, role: 'admin' },
-      { secret: accessSecret, issuer: accessIssuer, audience: accessAudience, algorithm: 'HS256', expiresIn: '5m' },
+      {
+        secret: accessSecret,
+        issuer: accessIssuer,
+        audience: accessAudience,
+        algorithm: 'HS256',
+        expiresIn: '5m',
+      },
     );
   });
 

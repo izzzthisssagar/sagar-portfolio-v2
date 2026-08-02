@@ -88,9 +88,9 @@ databaseSuite('Authentication vertical', () => {
       .expect(423);
     expect(locked.body.error.code).toBe('ACCOUNT_LOCKED');
 
-    const actions = (
-      await prisma.auditLog.findMany({ orderBy: { createdAt: 'asc' } })
-    ).map((row) => row.action);
+    const actions = (await prisma.auditLog.findMany({ orderBy: { createdAt: 'asc' } })).map(
+      (row) => row.action,
+    );
     expect(actions.filter((a) => a === 'LOGIN_LOCKED').length).toBeGreaterThan(0);
   });
 
@@ -190,7 +190,10 @@ databaseSuite('Authentication vertical', () => {
       .post('/api/v1/auth/login')
       .send({ email, password })
       .expect(200);
-    const accessToken = cookieValue(login.headers['set-cookie'] as unknown as string[], 'portfolio_access')!;
+    const accessToken = cookieValue(
+      login.headers['set-cookie'] as unknown as string[],
+      'portfolio_access',
+    )!;
     const session = await request(app.getHttpServer())
       .get('/api/v1/auth/session')
       .set('Authorization', `Bearer ${accessToken}`)
@@ -206,7 +209,10 @@ databaseSuite('Authentication vertical', () => {
       .set('Origin', WEB_URL)
       .send({ email, password })
       .expect(200);
-    const csrfToken = cookieValue(login.headers['set-cookie'] as unknown as string[], 'portfolio_csrf')!;
+    const csrfToken = cookieValue(
+      login.headers['set-cookie'] as unknown as string[],
+      'portfolio_csrf',
+    )!;
 
     const missing = await agent.post('/api/v1/auth/logout').set('Origin', WEB_URL).expect(403);
     expect(missing.body.error.code).toBe('CSRF_TOKEN_INVALID');

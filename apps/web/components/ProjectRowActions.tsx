@@ -6,7 +6,12 @@ import { useState } from 'react';
 import { ApiError, projects, type AdminProject } from '@/lib/admin-api.client';
 import { ConfirmDialog } from './ConfirmDialog';
 
-const NEXT_TRANSITION: Partial<Record<AdminProject['status'], { transition: 'draft' | 'review' | 'publish' | 'archive'; label: string }[]>> = {
+const NEXT_TRANSITION: Partial<
+  Record<
+    AdminProject['status'],
+    { transition: 'draft' | 'review' | 'publish' | 'archive'; label: string }[]
+  >
+> = {
   draft: [
     { transition: 'review', label: 'SEND TO REVIEW' },
     { transition: 'publish', label: 'PUBLISH' },
@@ -59,7 +64,12 @@ export function ProjectRowActions({ project }: { project: AdminProject }) {
       <Link href={`/admin/projects/${project.id}`}>EDIT</Link>
       <Link href={`/admin/projects/${project.id}/preview`}>PREVIEW</Link>
       {transitions.map((t) => (
-        <button key={t.transition} type="button" disabled={pending} onClick={() => runTransition(t.transition)}>
+        <button
+          key={t.transition}
+          type="button"
+          disabled={pending}
+          onClick={() => runTransition(t.transition)}
+        >
           {t.label}
         </button>
       ))}
