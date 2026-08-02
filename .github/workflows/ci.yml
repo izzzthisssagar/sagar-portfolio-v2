@@ -28,6 +28,11 @@ jobs:
       ACCESS_TOKEN_ISSUER: sagar-portfolio-api-ci
       ACCESS_TOKEN_AUDIENCE: sagar-portfolio-cms-ci
       REFRESH_TOKEN_SECRET: ci-only-refresh-token-secret-at-least-32-chars
+      WEB_URL: http://127.0.0.1:3000
+      API_URL: http://127.0.0.1:4000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+      ADMIN_EMAIL: ci-admin@example.invalid
+      ADMIN_PASSWORD: Ci-Only-Test-Admin-Password-9!
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -43,6 +48,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Provision a disposable test administrator
+        run: pnpm admin:create
+      - name: Confirm administrator provisioning refuses a duplicate
+        run: |
+          if pnpm admin:create; then
+            echo "Expected a second admin:create to fail (single administrator only)" >&2
+            exit 1
+          fi
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - run: pnpm audit --audit-level high
