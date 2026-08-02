@@ -6,11 +6,6 @@ import { jwtTestConfig } from '../../playwright.config';
 const publicRoutes = [
   '/',
   '/work',
-  '/work/qa-mastery',
-  '/work/numazu-halal-food',
-  '/work/api-security-testing',
-  '/work/performance-testing',
-  '/work/automation-testing',
   '/notes',
   '/notes/testing-otp-beyond-happy-path',
   '/about',

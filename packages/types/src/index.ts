@@ -10,9 +10,22 @@ export type PublicationStatus = 'draft' | 'review' | 'published' | 'archived';
 export type EvidenceState = 'confirmed' | 'pending' | 'unavailable';
 
 export interface ProjectMetric {
+  id?: string;
   label: string;
   value: string;
   evidence: EvidenceState;
+  sourceNote?: string | null;
+  order?: number;
+}
+export const FINDING_SEVERITIES = ['Critical', 'High', 'Medium', 'Low', 'Informational'] as const;
+export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
+export interface ProjectFinding {
+  id?: string;
+  title: string;
+  summary: string;
+  severity?: FindingSeverity | null;
+  evidenceStatus: EvidenceState;
+  order?: number;
 }
 export interface ProjectRecord {
   id: string;
@@ -23,6 +36,21 @@ export interface ProjectRecord {
   status: PublicationStatus;
   sceneState: SystemSceneState;
   metrics: ProjectMetric[];
+}
+export interface ProjectDetailRecord extends ProjectRecord {
+  overview?: string | null;
+  context?: string | null;
+  responsibilities?: string | null;
+  systemMap?: string | null;
+  testStrategy?: string | null;
+  fixAndRetest?: string | null;
+  outcome?: string | null;
+  lessons?: string | null;
+  liveUrl?: string | null;
+  githubUrl?: string | null;
+  labels?: string[];
+  publishedAt?: string | null;
+  findings: ProjectFinding[];
 }
 
 export interface ArticleRecord {

@@ -1,8 +1,11 @@
 import { ProjectIndex } from '@/components/HomeSections';
-export default function WorkPage() {
+import { getPublishedProjects } from '@/lib/public-content.server';
+
+export default async function WorkPage() {
+  const projects = await getPublishedProjects();
   return (
     <main id="main">
-      <ProjectIndex />
+      <ProjectIndex projects={projects} />
     </main>
   );
 }
