@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExperiencePreferencesProvider } from './ExperiencePreferences';
 import { SystemCanvas } from './SystemCanvas';
@@ -17,8 +17,7 @@ describe('SystemCanvas fallback', () => {
         <SystemCanvas />
       </ExperiencePreferencesProvider>,
     );
-    expect(await screen.findByRole('img', { name: /layered interface/i })).toHaveTextContent(
-      'WebGL unavailable',
-    );
+    const fallback = await screen.findByRole('img', { name: /layered interface/i });
+    await waitFor(() => expect(fallback).toHaveTextContent('WebGL unavailable'));
   });
 });
