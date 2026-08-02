@@ -127,6 +127,7 @@ model Project {
   sceneState       String            @default("inspection")
   status           PublicationStatus @default(DRAFT)
   order            Int               @default(0)
+  publishedAt      DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   metrics          ProjectMetric[]

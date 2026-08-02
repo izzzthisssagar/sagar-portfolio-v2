@@ -1,18 +1,53 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, PublicationStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { EvidenceStatus, Prisma, PublicationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   CreateProjectDto,
   ListProjectsDto,
   PublicListProjectsDto,
   UpdateProjectDto,
+  WorkflowTransition,
 } from './projects.dto';
+import { validateForPublication } from './publication-rules';
 
 const statusToDb = (status: string) => status.toUpperCase() as PublicationStatus;
-const projectView = <T extends { status: PublicationStatus }>(project: T) => ({
-  ...project,
-  status: project.status.toLowerCase(),
-});
+
+function projectView<
+  T extends {
+    status: PublicationStatus;
+    metrics?: { evidence: EvidenceStatus }[];
+    findings?: { evidenceStatus: EvidenceStatus }[];
+  },
+>(project: T) {
+  return {
+    ...project,
+    status: project.status.toLowerCase(),
+    ...(project.metrics
+      ? { metrics: project.metrics.map((m) => ({ ...m, evidence: m.evidence.toLowerCase() })) }
+      : {}),
+    ...(project.findings
+      ? {
+          findings: project.findings.map((f) => ({
+            ...f,
+            evidenceStatus: f.evidenceStatus.toLowerCase(),
+          })),
+        }
+      : {}),
+  };
+}
+
+const WORKFLOW_STATUS: Record<WorkflowTransition, PublicationStatus> = {
+  draft: PublicationStatus.DRAFT,
+  review: PublicationStatus.REVIEW,
+  publish: PublicationStatus.PUBLISHED,
+  archive: PublicationStatus.ARCHIVED,
+};
+const WORKFLOW_AUDIT_ACTION: Record<WorkflowTransition, string> = {
+  draft: 'PROJECT_UNPUBLISHED',
+  review: 'PROJECT_SENT_TO_REVIEW',
+  publish: 'PROJECT_PUBLISHED',
+  archive: 'PROJECT_ARCHIVED',
+};
 
 @Injectable()
 export class ProjectsService {
@@ -58,13 +93,23 @@ export class ProjectsService {
   async getPublicBySlug(slug: string) {
     const project = await this.prisma.project.findFirst({
       where: { slug, status: PublicationStatus.PUBLISHED },
+      include: {
+        metrics: { orderBy: { order: 'asc' } },
+        findings: { orderBy: { order: 'asc' } },
+      },
     });
     if (!project) throw new NotFoundException('Project not found');
     return projectView(project);
   }
 
   async getAdmin(id: string) {
-    const project = await this.prisma.project.findUnique({ where: { id } });
+    const project = await this.prisma.project.findUnique({
+      where: { id },
+      include: {
+        metrics: { orderBy: { order: 'asc' } },
+        findings: { orderBy: { order: 'asc' } },
+      },
+    });
     if (!project) throw new NotFoundException('Project not found');
     return projectView(project);
   }
@@ -95,13 +140,9 @@ export class ProjectsService {
 
   async update(id: string, input: UpdateProjectDto, actorId?: string) {
     await this.getAdmin(id);
-    const { status, ...fields } = input;
     try {
       const project = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.project.update({
-          where: { id },
-          data: { ...fields, ...(status ? { status: statusToDb(status) } : {}) },
-        });
+        const updated = await tx.project.update({ where: { id }, data: { ...input } });
         await tx.auditLog.create({
           data: {
             action: 'PROJECT_UPDATED',
@@ -134,5 +175,40 @@ export class ProjectsService {
         },
       });
     });
+  }
+
+  async transitionStatus(id: string, transition: WorkflowTransition, actorId?: string) {
+    const project = await this.getAdmin(id);
+    if (transition === 'publish') {
+      const errors = validateForPublication(project);
+      if (errors.length) {
+        throw new BadRequestException({
+          code: 'PUBLICATION_INVALID',
+          message: 'Project is not ready to publish.',
+          details: errors,
+        });
+      }
+    }
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.project.update({
+        where: { id },
+        data: {
+          status: WORKFLOW_STATUS[transition],
+          ...(transition === 'publish' ? { publishedAt: now } : {}),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          action: WORKFLOW_AUDIT_ACTION[transition],
+          resource: 'Project',
+          resourceId: id,
+          ...(actorId ? { actorId } : {}),
+          metadata: { transition },
+        },
+      });
+      return next;
+    });
+    return projectView(updated);
   }
 }

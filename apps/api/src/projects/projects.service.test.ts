@@ -65,6 +65,10 @@ describe('ProjectsService', () => {
     await expect(service.getPublicBySlug('draft')).rejects.toThrow('Project not found');
     expect(prisma.project.findFirst).toHaveBeenCalledWith({
       where: { slug: 'draft', status: 'PUBLISHED' },
+      include: {
+        metrics: { orderBy: { order: 'asc' } },
+        findings: { orderBy: { order: 'asc' } },
+      },
     });
   });
   it('creates, changes slug without changing identity, and deletes with audit events', async () => {
