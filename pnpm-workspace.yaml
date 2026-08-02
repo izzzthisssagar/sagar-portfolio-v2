@@ -22,3 +22,6 @@ onlyBuiltDependencies:
   - prisma
   - sharp
   - unrs-resolver
+
+minimumReleaseAgeExclude:
+  - jose@6.2.7

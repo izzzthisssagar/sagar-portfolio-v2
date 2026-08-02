@@ -5,6 +5,10 @@
     "dev": { "cache": false, "persistent": true },
     "lint": { "dependsOn": ["^build"] },
     "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"], "outputs": ["coverage/**"] }
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"],
+      "env": ["DATABASE_URL", "ACCESS_TOKEN_SECRET", "ACCESS_TOKEN_ISSUER", "ACCESS_TOKEN_AUDIENCE"]
+    }
   }
 }

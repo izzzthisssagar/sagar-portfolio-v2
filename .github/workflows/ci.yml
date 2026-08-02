@@ -1,0 +1,50 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: sagar_portfolio_test
+          POSTGRES_USER: portfolio
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U portfolio -d sagar_portfolio_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://portfolio:ci-only-password@localhost:5432/sagar_portfolio_test?schema=public
+      ACCESS_TOKEN_SECRET: ci-only-access-token-secret-at-least-32-chars
+      ACCESS_TOKEN_ISSUER: sagar-portfolio-api-ci
+      ACCESS_TOKEN_AUDIENCE: sagar-portfolio-cms-ci
+      REFRESH_TOKEN_SECRET: ci-only-refresh-token-secret-at-least-32-chars
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.18.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm exec prisma validate
+      - run: pnpm exec prisma migrate deploy
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - run: pnpm audit --audit-level high
+      - name: Tracked .env file check
+        run: test -f .env.example && ! git ls-files | grep -E '(^|/)\.env$'
