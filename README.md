@@ -15,7 +15,9 @@ corepack enable
 pnpm install --frozen-lockfile
 cp .env.example .env
 docker compose up -d postgres
+pnpm exec prisma generate
 pnpm exec prisma validate
+pnpm exec prisma migrate deploy
 pnpm dev
 ```
 
@@ -36,7 +38,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-`pnpm verify` runs the non-browser release gate. Playwright browser binaries must be installed separately with `pnpm exec playwright install chromium`.
+`pnpm verify` runs the non-browser release gate. Playwright browser binaries must be installed separately with `pnpm exec playwright install chromium`. API integration tests use `DATABASE_URL`; the local Compose database is appropriate only for development and tests.
 
 ## Architecture
 

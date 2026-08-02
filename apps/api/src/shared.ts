@@ -5,13 +5,9 @@ import {
   ExceptionFilter,
   Get,
   HttpException,
-  Injectable,
-  CanActivate,
-  ExecutionContext,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 @Catch()
 export class ErrorEnvelopeFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
@@ -32,14 +28,5 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
 export class HealthController {
   @Get('health') health() {
     return { status: 'ok', service: 'portfolio-api', version: 'v1' };
-  }
-}
-@Injectable()
-export class AdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext) {
-    const request = context.switchToHttp().getRequest<Request>();
-    if (request.headers.authorization !== 'Bearer sprint-1-test-token')
-      throw new UnauthorizedException();
-    return true;
   }
 }

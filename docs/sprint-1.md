@@ -15,6 +15,6 @@ Deliver a test-backed vertical foundation: semantic portfolio, adaptive procedur
 ## Explicit Sprint 1 limits
 
 - The final GLB, KTX2 textures, project screenshots, CV, and approved portrait are not supplied.
-- Docker/PostgreSQL runtime verification depends on Docker availability.
-- Admin production login needs externally provisioned secrets and an Argon2 hash.
-- Full CRUD persistence, media storage, email delivery, scroll choreography, and playable Phaser challenges are later vertical slices.
+- Admin production login and session issuance need externally provisioned secrets, an Argon2 hash, and the next authenticated vertical; there is no development bypass.
+- Project CRUD persistence and audit events are implemented, but the CMS forms are still a read-only shell.
+- Media storage, email delivery, scroll choreography, final GLB assets, and playable Phaser challenges are later vertical slices.

@@ -17,6 +17,7 @@
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.11.0",
     "@playwright/test": "1.62.1",
     "@prisma/client": "7.9.1",
     "prettier": "3.6.2",
