@@ -1,0 +1,4 @@
+export const ACCESS_TOKEN_SECONDS = 15 * 60;
+
+const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 7);
+export const REFRESH_TOKEN_SECONDS = REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60;

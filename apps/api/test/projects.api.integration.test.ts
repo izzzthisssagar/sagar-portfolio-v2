@@ -1,10 +1,11 @@
-import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { PublicationStatus } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 const databaseSuite = process.env.DATABASE_URL ? describe : describe.skip;
@@ -24,10 +25,7 @@ databaseSuite('Project publication API boundary', () => {
     }
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication();
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
-    );
+    configureApp(app);
     await app.init();
     prisma = module.get(PrismaService);
     await prisma.project.deleteMany({ where: { slug: { startsWith: prefix } } });

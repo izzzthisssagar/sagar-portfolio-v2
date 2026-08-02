@@ -17,7 +17,7 @@ describe('auth security contracts', () => {
     expect(canAttemptLogin(state, new Date(now.getTime() + 16 * 60 * 1000))).toBe(true);
   });
   it('stores refresh tokens as stable hashes and rotates raw values', () => {
-    const service = new AuthService();
+    const service = new AuthService({} as never, {} as never);
     const a = service.newRefreshToken();
     const b = service.newRefreshToken();
     expect(a.token).not.toBe(b.token);

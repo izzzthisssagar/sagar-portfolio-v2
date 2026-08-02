@@ -13,15 +13,18 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
     const status = exception instanceof HttpException ? exception.getStatus() : 500;
+    if (status === 500) console.error('Unhandled exception', exception);
     const raw =
       exception instanceof HttpException ? exception.getResponse() : 'Internal server error';
     const message =
       typeof raw === 'string'
         ? raw
         : ((raw as { message?: string | string[] }).message ?? 'Request failed');
-    response
-      .status(status)
-      .json({ error: { code: `HTTP_${status}`, message, requestId: randomUUID() } });
+    const code =
+      typeof raw === 'object' && raw !== null && typeof (raw as { code?: unknown }).code === 'string'
+        ? (raw as { code: string }).code
+        : `HTTP_${status}`;
+    response.status(status).json({ error: { code, message, requestId: randomUUID() } });
   }
 }
 @Controller()

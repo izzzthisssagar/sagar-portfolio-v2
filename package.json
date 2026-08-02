@@ -14,14 +14,19 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:e2e": "playwright test",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "admin:create": "tsx apps/api/scripts/admin-create.ts",
+    "db:seed": "tsx prisma/seed.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.11.0",
     "@playwright/test": "1.62.1",
     "@prisma/client": "7.9.1",
+    "@types/node": "24.10.0",
+    "dotenv": "17.4.2",
     "prettier": "3.6.2",
     "prisma": "7.9.1",
+    "tsx": "4.20.6",
     "turbo": "2.10.8",
     "typescript": "5.9.3"
   }

@@ -1,29 +1,82 @@
-import { Body, Controller, HttpCode, Post, Res } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
-import { IsEmail, IsString, MinLength } from 'class-validator';
-import type { Response } from 'express';
-class LoginDto {
-  @IsEmail() email!: string;
-  @IsString() @MinLength(12) password!: string;
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Request, Response } from 'express';
+import { LoginDto } from './auth.dto';
+import { AuthService } from './auth.service';
+import {
+  REFRESH_TOKEN_COOKIE,
+  clearAuthCookies,
+  setAccessCookie,
+  setCsrfCookie,
+  setRefreshCookie,
+} from './cookies';
+import { CsrfGuard, SkipCsrfToken } from './csrf.guard';
+import { type AdminRequest, JwtAuthGuard } from './jwt-auth.guard';
+import { randomBytes } from 'node:crypto';
+
+function clientIp(request: Request): string | undefined {
+  return request.ip;
 }
+
+function issueSession(response: Response, tokens: {
+  accessToken: string;
+  refreshToken: string;
+  admin: { id: string; email: string };
+}) {
+  const csrfToken = randomBytes(24).toString('base64url');
+  setAccessCookie(response, tokens.accessToken);
+  setRefreshCookie(response, tokens.refreshToken);
+  setCsrfCookie(response, csrfToken);
+  return { data: { email: tokens.admin.email } };
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  @Post('login') @HttpCode(503) login(@Body() _body: LoginDto, @Res() response: Response) {
-    return response.status(503).json({
-      error: {
-        code: 'AUTH_NOT_PROVISIONED',
-        message: 'Administrator credentials and persistence must be provisioned before login.',
-        requestId: 'provisioning-required',
-      },
-    });
+  constructor(private readonly auth: AuthService) {}
+
+  @Post('login')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseGuards(CsrfGuard)
+  @SkipCsrfToken()
+  async login(@Body() body: LoginDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const tokens = await this.auth.login(body.email, body.password, clientIp(request));
+    return issueSession(response, tokens);
   }
-  @Post('logout') @HttpCode(204) logout(@Res({ passthrough: true }) response: Response) {
-    response.clearCookie('portfolio_refresh', {
-      httpOnly: true,
-      sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/api/v1/auth',
-    });
+
+  @Post('refresh')
+  @HttpCode(200)
+  @UseGuards(CsrfGuard)
+  async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const raw = request.cookies?.[REFRESH_TOKEN_COOKIE] as string | undefined;
+    const tokens = await this.auth.refresh(raw, clientIp(request));
+    return issueSession(response, tokens);
+  }
+
+  @Post('logout')
+  @HttpCode(204)
+  @UseGuards(CsrfGuard)
+  async logout(@Req() request: AdminRequest, @Res({ passthrough: true }) response: Response) {
+    const raw = request.cookies?.[REFRESH_TOKEN_COOKIE] as string | undefined;
+    await this.auth.logout(raw, request.user?.sub, clientIp(request));
+    clearAuthCookies(response);
+  }
+
+  @Post('logout-all')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @ApiBearerAuth()
+  async logoutAll(@Req() request: AdminRequest, @Res({ passthrough: true }) response: Response) {
+    await this.auth.logoutAll(request.user!.sub, clientIp(request));
+    clearAuthCookies(response);
+  }
+
+  @Get('session')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  async session(@Req() request: AdminRequest) {
+    return { data: await this.auth.getSession(request.user!.sub) };
   }
 }
