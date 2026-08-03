@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MediaCategory, MediaStatus } from '@prisma/client';
+import { MediaCategory, MediaStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateCvDocumentDto } from './cv.dto';
 
@@ -59,26 +59,43 @@ export class CvService {
     return created;
   }
 
+  /** The `updateMany` (deactivate) + `update` (activate) pair is not, by itself, safe under
+   * concurrent initial activations — two requests can both observe "no row is active" before
+   * either commits. The partial unique index on `CvDocument(active) WHERE active` (migration
+   * 20260803090512_cv_document_single_active_constraint) is what actually prevents two rows
+   * ending up active: Postgres serializes the two transactions at the conflicting index entry,
+   * lets exactly one commit, and the loser gets a unique-constraint violation here — which rolls
+   * back its entire transaction (deactivation included), leaving no partial activation state. */
   async activate(id: string, actorId?: string) {
     await this.get(id);
-    const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.cvDocument.updateMany({ where: { active: true }, data: { active: false } });
-      const doc = await tx.cvDocument.update({
-        where: { id },
-        data: { active: true },
-        include: { media: true },
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        await tx.cvDocument.updateMany({ where: { active: true }, data: { active: false } });
+        const doc = await tx.cvDocument.update({
+          where: { id },
+          data: { active: true },
+          include: { media: true },
+        });
+        await tx.auditLog.create({
+          data: {
+            action: 'CV_ACTIVATED',
+            resource: 'CvDocument',
+            resourceId: id,
+            ...(actorId ? { actorId } : {}),
+          },
+        });
+        return doc;
       });
-      await tx.auditLog.create({
-        data: {
-          action: 'CV_ACTIVATED',
-          resource: 'CvDocument',
-          resourceId: id,
-          ...(actorId ? { actorId } : {}),
-        },
-      });
-      return doc;
-    });
-    return updated;
+      return updated;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'CV_ACTIVATION_CONFLICT',
+          message: 'Another CV activation is in progress. Retry.',
+        });
+      }
+      throw error;
+    }
   }
 
   /** "Archiving" an old version just means it stops being active (done via activating a

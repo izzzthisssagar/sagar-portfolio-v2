@@ -46,7 +46,8 @@ test.describe('CMS media pipeline', () => {
 
     const afterApproval = await request.get(`http://127.0.0.1:4000/api/v1/media/${mediaId}/file`);
     expect(afterApproval.ok()).toBe(true);
-    expect(afterApproval.headers()['cache-control']).toBe('public, max-age=31536000, immutable');
+    // Revocation-safe, not immutable — see public-media.controller.ts.
+    expect(afterApproval.headers()['cache-control']).toBe('public, max-age=0, must-revalidate');
 
     // Approved media attached to nothing can be deleted outright.
     await page.getByRole('button', { name: 'DELETE' }).click();

@@ -209,8 +209,10 @@ model ProjectMedia {
 }
 
 /// Tracks CV PDF versions uploaded through the media pipeline. Exactly one row may have
-/// `active = true` at a time (enforced transactionally in CvService, not a DB constraint) — the
-/// public CV download route serves whichever MediaAsset that row points to.
+/// `active = true` at a time — enforced transactionally in CvService AND by a partial unique
+/// index on (active) WHERE active = true (migration 20260803090512_cv_document_single_active_constraint;
+/// not representable in this schema language, so it exists only in that migration's raw SQL).
+/// The public CV download route serves whichever MediaAsset that row points to.
 model CvDocument {
   id          String     @id @default(cuid())
   mediaId     String     @unique

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { EvidenceStatus, MediaStatus } from '@prisma/client';
+import { EvidenceStatus, MediaCategory, MediaStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateProjectEvidenceDto, UpdateProjectEvidenceDto } from './project-evidence.dto';
 
@@ -7,6 +7,27 @@ const evidenceToDb = (status: string) => status.toUpperCase() as EvidenceStatus;
 const evidenceView = <T extends { evidenceStatus: EvidenceStatus }>(row: T) => ({
   ...row,
   evidenceStatus: row.evidenceStatus.toLowerCase(),
+});
+
+/** Public shape — see `publicEvidenceView` in `projects.service.ts` (the one actually reached by
+ * the public route via `Project.evidence`); kept in sync here since this method returns the same
+ * concept directly, without a nested MediaAsset, storageKey, sha256, or internal timestamps. */
+const publicEvidenceView = (row: {
+  id: string;
+  mediaId: string;
+  title: string | null;
+  caption: string | null;
+  altText: string | null;
+  evidenceStatus: EvidenceStatus;
+  order: number;
+}) => ({
+  id: row.id,
+  mediaId: row.mediaId,
+  title: row.title,
+  caption: row.caption,
+  altText: row.altText,
+  evidenceStatus: row.evidenceStatus.toLowerCase(),
+  order: row.order,
 });
 
 @Injectable()
@@ -29,6 +50,8 @@ export class ProjectEvidenceService {
     return row;
   }
 
+  /** Project evidence renders as an image gallery — an approved PDF or other document asset is
+   * not a valid attachment even though it passes the media pipeline's own approval workflow. */
   private async ensureApprovedMedia(mediaId: string) {
     const media = await this.prisma.mediaAsset.findUnique({ where: { id: mediaId } });
     if (!media) throw new BadRequestException('Media asset not found.');
@@ -36,6 +59,12 @@ export class ProjectEvidenceService {
       throw new BadRequestException({
         code: 'MEDIA_NOT_APPROVED',
         message: 'Only approved media may be attached as project evidence.',
+      });
+    }
+    if (media.category !== MediaCategory.IMAGE) {
+      throw new BadRequestException({
+        code: 'EVIDENCE_REQUIRES_IMAGE',
+        message: 'Project evidence must be an approved image, not a document.',
       });
     }
   }
@@ -61,9 +90,8 @@ export class ProjectEvidenceService {
         media: { status: MediaStatus.APPROVED },
       },
       orderBy: { order: 'asc' },
-      include: { media: true },
     });
-    return rows.map(evidenceView);
+    return rows.map(publicEvidenceView);
   }
 
   async create(projectId: string, input: CreateProjectEvidenceDto, actorId?: string) {

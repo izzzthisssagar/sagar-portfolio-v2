@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MediaStatus, Prisma, PublicationStatus } from '@prisma/client';
+import { MediaCategory, MediaStatus, Prisma, PublicationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   CreatePostDto,
@@ -62,6 +62,18 @@ function postView(post: PostWithRelations) {
   };
 }
 
+/** Public counterpart to `postView` — a featured image attached while approved but later
+ * archived/rejected must stop appearing on the public post the moment its status changes,
+ * without requiring an edit to the post itself. Admin/preview (`postView`) always shows it, since
+ * the CMS needs to surface that broken state to an editor. */
+function publicPostView(post: PostWithRelations) {
+  const view = postView(post);
+  return {
+    ...view,
+    featuredImage: post.featuredImage?.status === MediaStatus.APPROVED ? view.featuredImage : null,
+  };
+}
+
 function estimateReadingTime(body: string): number {
   const words = body.trim().split(/\s+/).filter(Boolean).length;
   return Math.max(1, Math.round(words / 200));
@@ -97,6 +109,7 @@ export class PostsService {
   private async list(
     query: ListPostsDto | PublicListPostsDto,
     publication: PublicationStatus | undefined,
+    isPublic: boolean,
     search?: string,
   ) {
     const where: Prisma.BlogPostWhereInput = {
@@ -125,15 +138,23 @@ export class PostsService {
       }),
       this.prisma.blogPost.count({ where }),
     ]);
-    return { data: data.map(postView), meta: { page: query.page, limit: query.limit, total } };
+    return {
+      data: data.map(isPublic ? publicPostView : postView),
+      meta: { page: query.page, limit: query.limit, total },
+    };
   }
 
   listPublic(query: PublicListPostsDto) {
-    return this.list(query, PublicationStatus.PUBLISHED);
+    return this.list(query, PublicationStatus.PUBLISHED, true);
   }
 
   listAdmin(query: ListPostsDto) {
-    return this.list(query, query.status ? statusToDb(query.status) : undefined, query.search);
+    return this.list(
+      query,
+      query.status ? statusToDb(query.status) : undefined,
+      false,
+      query.search,
+    );
   }
 
   async getPublicBySlug(slug: string) {
@@ -142,7 +163,7 @@ export class PostsService {
       include: PUBLIC_INCLUDE,
     });
     if (!post) throw new NotFoundException('Post not found');
-    return postView(post);
+    return publicPostView(post);
   }
 
   async getAdmin(id: string) {
@@ -151,7 +172,21 @@ export class PostsService {
     return postView(post);
   }
 
+  /** A featured image must exist, be an IMAGE (not a document), and be APPROVED — checked on
+   * every create/update that sets it, not only at publish time, so an invalid reference can never
+   * be saved onto a post in the first place (draft or published). */
+  private async ensureFeaturedImageValid(featuredImageId: string) {
+    const media = await this.prisma.mediaAsset.findUnique({ where: { id: featuredImageId } });
+    if (!media || media.category !== MediaCategory.IMAGE || media.status !== MediaStatus.APPROVED) {
+      throw new BadRequestException({
+        code: 'FEATURED_IMAGE_INVALID',
+        message: 'The featured image must be an approved image.',
+      });
+    }
+  }
+
   async create(input: CreatePostDto, actorId?: string) {
+    if (input.featuredImageId) await this.ensureFeaturedImageValid(input.featuredImageId);
     try {
       const post = await this.prisma.$transaction(async (tx) => {
         const categoryId = await this.defaultCategoryId(tx);
@@ -205,6 +240,11 @@ export class PostsService {
         });
       }
     }
+    // Re-checked on every update that sets a featuredImageId (published or not) — validating
+    // only at create time would let a later PATCH swap in an unapproved or non-image asset. On
+    // rejection this throws before the transaction below ever runs, so the stored (possibly
+    // published) record is left exactly as it was.
+    if (input.featuredImageId) await this.ensureFeaturedImageValid(input.featuredImageId);
     try {
       const post = await this.prisma.$transaction(async (tx) => {
         const tagConnect = await this.tagConnections(tx, input.tags);

@@ -263,4 +263,155 @@ describe('MediaService', () => {
     prisma.mediaAsset.findUnique.mockResolvedValueOnce({ ...baseMedia, status: 'QUARANTINED' });
     expect(await service.getApprovedFile('m1')).toBeNull();
   });
+
+  it('returns null for a public file request against an approved document (PDF)', async () => {
+    const { service, prisma } = setup();
+    prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+      ...baseMedia,
+      status: 'APPROVED',
+      category: 'DOCUMENT',
+    });
+    expect(await service.getApprovedFile('m1')).toBeNull();
+  });
+
+  describe('update() alt-text invariant on approved images', () => {
+    const approvedImage = { ...baseMedia, status: 'APPROVED', altText: 'Existing alt text.' };
+
+    it('rejects clearing alt text on an approved, non-decorative image', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue(approvedImage);
+      await expect(service.update('m1', { altText: '' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      await expect(service.update('m1', { altText: '   ' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('rejects marking non-decorative with no alt text supplied and none already stored', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue({
+        ...approvedImage,
+        altText: null,
+        decorative: true,
+      });
+      await expect(service.update('m1', { decorative: false })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('allows marking an approved image decorative even with no alt text', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue({ ...approvedImage, altText: null });
+      await expect(service.update('m1', { decorative: true })).resolves.toBeDefined();
+    });
+
+    it('allows an unrelated field edit that keeps the existing alt text intact', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue(approvedImage);
+      await expect(service.update('m1', { caption: 'New caption' })).resolves.toBeDefined();
+    });
+
+    it('does not apply the invariant to a still-quarantined image', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue({ ...baseMedia, status: 'QUARANTINED' });
+      await expect(service.update('m1', { altText: '' })).resolves.toBeDefined();
+    });
+
+    it('does not apply the invariant to a document', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue({
+        ...approvedImage,
+        category: 'DOCUMENT',
+        altText: null,
+      });
+      await expect(service.update('m1', { decorative: false })).resolves.toBeDefined();
+    });
+  });
+
+  describe('storage/database compensation (fault injection)', () => {
+    it('upload: deletes the quarantine object if the database transaction fails', async () => {
+      const { service, tx, storage } = setup();
+      tx.mediaAsset.create.mockRejectedValueOnce(new Error('db down'));
+      const buffer = await pngBuffer();
+      await expect(
+        service.upload({ buffer, originalname: 'photo.png', mimetype: 'image/png' }),
+      ).rejects.toThrow('db down');
+      expect(storage.objects.size).toBe(0);
+    });
+
+    it('approve: restores the quarantine object if the database transaction fails', async () => {
+      const { service, tx, storage } = setup();
+      await storage.put('quarantine/abc.png', Buffer.from('bytes'), 'image/png');
+      tx.mediaAsset.update.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.approve('m1', { decorative: true })).rejects.toThrow('db down');
+      expect(storage.objects.has('quarantine/abc.png')).toBe(true);
+      expect(storage.objects.has('approved/abc.png')).toBe(false);
+    });
+
+    it('archive: restores the approved object if the database transaction fails', async () => {
+      const { service, prisma, tx, storage } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValue({
+        ...baseMedia,
+        status: 'APPROVED',
+        storageKey: 'approved/abc.png',
+      });
+      await storage.put('approved/abc.png', Buffer.from('bytes'), 'image/png');
+      tx.mediaAsset.update.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.archive('m1')).rejects.toThrow('db down');
+      expect(storage.objects.has('approved/abc.png')).toBe(true);
+      expect(storage.objects.has('archived/abc.png')).toBe(false);
+    });
+
+    it('remove: restores the object to its original key if the database transaction fails, leaving no row pointing at a missing object', async () => {
+      const { service, prisma, tx, storage } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+        ...baseMedia,
+        projects: [],
+        socialFor: [],
+        featuredFor: [],
+        portraitFor: [],
+        cvDocument: null,
+      });
+      await storage.put('quarantine/abc.png', Buffer.from('bytes'), 'image/png');
+      tx.mediaAsset.delete.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.remove('m1')).rejects.toThrow('db down');
+      // The row (per the mock) still exists and still points at the original key — the object
+      // must be back there, not stuck in trash, and not deleted outright.
+      expect(storage.objects.has('quarantine/abc.png')).toBe(true);
+      expect(storage.objects.size).toBe(1);
+    });
+
+    it('remove: never touches the database if moving to trash fails, leaving the object exactly where it was', async () => {
+      const { service, prisma, tx, storage } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+        ...baseMedia,
+        projects: [],
+        socialFor: [],
+        featuredFor: [],
+        portraitFor: [],
+        cvDocument: null,
+      });
+      await storage.put('quarantine/abc.png', Buffer.from('bytes'), 'image/png');
+      vi.spyOn(storage, 'move').mockRejectedValueOnce(new Error('storage unavailable'));
+      await expect(service.remove('m1')).rejects.toThrow('storage unavailable');
+      expect(storage.objects.has('quarantine/abc.png')).toBe(true);
+      expect(tx.mediaAsset.delete).not.toHaveBeenCalled();
+    });
+
+    it('remove: deletes the trash object once the database transaction succeeds, leaving no orphan', async () => {
+      const { service, prisma, storage } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+        ...baseMedia,
+        projects: [],
+        socialFor: [],
+        featuredFor: [],
+        portraitFor: [],
+        cvDocument: null,
+      });
+      await storage.put('quarantine/abc.png', Buffer.from('bytes'), 'image/png');
+      await service.remove('m1');
+      expect(storage.objects.size).toBe(0);
+    });
+  });
 });

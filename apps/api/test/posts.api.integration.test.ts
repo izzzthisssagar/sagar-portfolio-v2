@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import * as argon2 from 'argon2';
 import request from 'supertest';
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
@@ -54,6 +55,68 @@ databaseSuite('Field Notes vertical: persistence, publication workflow, public v
 
   const auth = () => ({ Authorization: `Bearer ${adminToken}` });
   const server = () => app.getHttpServer();
+
+  // Trailing bytes appended after a PNG's IEND chunk (or a PDF's %%EOF) don't affect decoding —
+  // ignored by both `file-type`'s magic-byte sniffing and sharp's decoder — but they do change
+  // the upload's SHA-256, which the media pipeline dedupes by. Embedding this file's own
+  // `prefix` guarantees these fixtures can never collide with another integration test file's
+  // fixture content sharing the same nominal seed counter, even when the whole suite runs
+  // sequentially against one shared database (see media.api/dashboard.api/portrait-cv.api tests).
+  let imageSeed = 0;
+  async function uploadApprovedImage() {
+    imageSeed += 1;
+    const base = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#3355ff' } })
+      .png()
+      .toBuffer();
+    const buffer = Buffer.concat([base, Buffer.from(`${prefix}featured-${imageSeed}`)]);
+    const uploaded = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', buffer, { filename: 'featured.png', contentType: 'image/png' })
+      .expect(201);
+    const id = uploaded.body.data.id as string;
+    await request(server())
+      .post(`/api/v1/admin/media/${id}/approve`)
+      .set(auth())
+      .send({ altText: 'A test featured image.' })
+      .expect(201);
+    return id;
+  }
+
+  async function uploadQuarantinedImage() {
+    imageSeed += 1;
+    const base = await sharp({ create: { width: 20, height: 4, channels: 3, background: '#112233' } })
+      .png()
+      .toBuffer();
+    const buffer = Buffer.concat([base, Buffer.from(`${prefix}quarantined-${imageSeed}`)]);
+    const uploaded = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', buffer, { filename: 'quarantined-featured.png', contentType: 'image/png' })
+      .expect(201);
+    return uploaded.body.data.id as string;
+  }
+
+  let pdfSeed = 0;
+  async function uploadApprovedPdf() {
+    pdfSeed += 1;
+    const pdf = Buffer.from(
+      `%PDF-1.4\n1 0 obj<</Type/Catalog/Seed ${prefix}${pdfSeed}>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF`,
+      'latin1',
+    );
+    const uploaded = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', pdf, { filename: `featured-${pdfSeed}.pdf`, contentType: 'application/pdf' })
+      .expect(201);
+    const id = uploaded.body.data.id as string;
+    await request(server())
+      .post(`/api/v1/admin/media/${id}/approve`)
+      .set(auth())
+      .send({ decorative: true })
+      .expect(201);
+    return id;
+  }
 
   it('rejects admin routes without a token', async () => {
     await request(server()).get('/api/v1/admin/posts').expect(401);
@@ -247,5 +310,132 @@ databaseSuite('Field Notes vertical: persistence, publication workflow, public v
       await prisma.auditLog.findMany({ where: { resourceId: id }, orderBy: { createdAt: 'asc' } })
     ).map((row) => row.action);
     expect(actions).toEqual(['POST_CREATED', 'POST_PUBLISHED', 'POST_DELETED']);
+  });
+
+  describe('featured image validation', () => {
+    it('rejects an unapproved (quarantined) featured image on create', async () => {
+      const featuredImageId = await uploadQuarantinedImage();
+      await request(server())
+        .post('/api/v1/admin/posts')
+        .set(auth())
+        .send({
+          title: 'Unapproved featured image',
+          slug: `${prefix}unapproved-featured`,
+          excerpt: 'A sufficiently long excerpt for the article.',
+          body: 'Body content.',
+          featuredImageId,
+        })
+        .expect(400);
+    });
+
+    it('rejects a PDF as a featured image on create', async () => {
+      const featuredImageId = await uploadApprovedPdf();
+      await request(server())
+        .post('/api/v1/admin/posts')
+        .set(auth())
+        .send({
+          title: 'PDF featured image',
+          slug: `${prefix}pdf-featured`,
+          excerpt: 'A sufficiently long excerpt for the article.',
+          body: 'Body content.',
+          featuredImageId,
+        })
+        .expect(400);
+    });
+
+    it('accepts an approved image as a featured image on create', async () => {
+      const featuredImageId = await uploadApprovedImage();
+      const created = await request(server())
+        .post('/api/v1/admin/posts')
+        .set(auth())
+        .send({
+          title: 'Approved featured image',
+          slug: `${prefix}approved-featured`,
+          excerpt: 'A sufficiently long excerpt for the article.',
+          body: 'Body content.',
+          featuredImageId,
+        })
+        .expect(201);
+      expect(created.body.data.featuredImage.id).toBe(featuredImageId);
+    });
+
+    it('rejects patching a published post to an invalid featured image, leaving the stored record unchanged', async () => {
+      const goodImageId = await uploadApprovedImage();
+      const created = await request(server())
+        .post('/api/v1/admin/posts')
+        .set(auth())
+        .send({
+          title: 'Published, then bad featured-image patch',
+          slug: `${prefix}published-bad-featured-patch`,
+          excerpt: 'A sufficiently long excerpt for the article.',
+          body: 'Body content long enough to publish.',
+          featuredImageId: goodImageId,
+        })
+        .expect(201);
+      const id = created.body.data.id as string;
+      await request(server())
+        .post(`/api/v1/admin/posts/${id}/workflow`)
+        .set(auth())
+        .send({ transition: 'publish' })
+        .expect(201);
+
+      const badImageId = await uploadQuarantinedImage();
+      await request(server())
+        .patch(`/api/v1/admin/posts/${id}`)
+        .set(auth())
+        .send({ featuredImageId: badImageId })
+        .expect(400);
+
+      const after = await request(server())
+        .get(`/api/v1/admin/posts/${id}`)
+        .set(auth())
+        .expect(200);
+      expect(after.body.data.featuredImageId).toBe(goodImageId);
+      expect(after.body.data.status).toBe('published');
+    });
+
+    it("never exposes a featured image on the public post once it's archived or rejected", async () => {
+      const featuredImageId = await uploadApprovedImage();
+      const created = await request(server())
+        .post('/api/v1/admin/posts')
+        .set(auth())
+        .send({
+          title: 'Featured image later archived',
+          slug: `${prefix}featured-later-archived`,
+          excerpt: 'A sufficiently long excerpt for the article.',
+          body: 'Body content long enough to publish.',
+          featuredImageId,
+        })
+        .expect(201);
+      const id = created.body.data.id as string;
+      await request(server())
+        .post(`/api/v1/admin/posts/${id}/workflow`)
+        .set(auth())
+        .send({ transition: 'publish' })
+        .expect(201);
+
+      const beforeArchive = await request(server())
+        .get(`/api/v1/posts/${created.body.data.slug}`)
+        .expect(200);
+      expect(beforeArchive.body.data.featuredImage.id).toBe(featuredImageId);
+
+      await request(server())
+        .post(`/api/v1/admin/media/${featuredImageId}/archive`)
+        .set(auth())
+        .expect(201);
+
+      const afterArchive = await request(server())
+        .get(`/api/v1/posts/${created.body.data.slug}`)
+        .expect(200);
+      expect(afterArchive.body.data.featuredImage).toBeNull();
+
+      // The admin/preview view, by contrast, still shows it — the CMS needs to see the broken
+      // reference to fix it, unlike the public page.
+      const adminView = await request(server())
+        .get(`/api/v1/admin/posts/${id}`)
+        .set(auth())
+        .expect(200);
+      expect(adminView.body.data.featuredImage.id).toBe(featuredImageId);
+    });
   });
 });

@@ -17,6 +17,33 @@ import { validateForPublication } from './publication-rules';
 
 const statusToDb = (status: string) => status.toUpperCase() as PublicationStatus;
 
+interface ProjectMediaRow {
+  id: string;
+  mediaId: string;
+  title: string | null;
+  caption: string | null;
+  altText: string | null;
+  evidenceStatus: EvidenceStatus;
+  order: number;
+}
+
+/** The only shape of project evidence ever returned to an unauthenticated caller. Deliberately
+ * enumerates every field rather than spreading the ProjectMedia row — a spread would silently
+ * start exposing any field added to the model later (internal timestamps, sourceNote, and
+ * critically the nested MediaAsset with its storageKey/sha256/createdById/metadata) without a
+ * reviewer having to touch this file. See docs/sprint-3.md. */
+function publicEvidenceView(row: ProjectMediaRow) {
+  return {
+    id: row.id,
+    mediaId: row.mediaId,
+    title: row.title,
+    caption: row.caption,
+    altText: row.altText,
+    evidenceStatus: row.evidenceStatus.toLowerCase(),
+    order: row.order,
+  };
+}
+
 function projectView<
   T extends {
     status: PublicationStatus;
@@ -43,13 +70,43 @@ function projectView<
       ? {
           // Exposed as `evidence`, not `media` — `media` is the raw ProjectMedia relation name,
           // `evidence` is the public-facing concept (see docs/sprint-3.md / ProjectMedia model
-          // comment in schema.prisma).
+          // comment in schema.prisma). Full CMS shape (nested MediaAsset included) — admin-only,
+          // never returned unauthenticated. See publicProjectView for the public equivalent.
           evidence: project.media.map((m) => ({
             ...m,
             evidenceStatus: m.evidenceStatus.toLowerCase(),
           })),
         }
       : {}),
+  };
+}
+
+/** Public counterpart to `projectView` — identical except evidence is mapped through
+ * `publicEvidenceView` instead of spread verbatim. Used only by `getPublicBySlug`. */
+function publicProjectView<
+  T extends {
+    status: PublicationStatus;
+    metrics?: { evidence: EvidenceStatus }[];
+    findings?: { evidenceStatus: EvidenceStatus }[];
+    media?: ProjectMediaRow[];
+  },
+>(project: T) {
+  const { media, ...rest } = project;
+  return {
+    ...rest,
+    status: rest.status.toLowerCase(),
+    ...(rest.metrics
+      ? { metrics: rest.metrics.map((m) => ({ ...m, evidence: m.evidence.toLowerCase() })) }
+      : {}),
+    ...(rest.findings
+      ? {
+          findings: rest.findings.map((f) => ({
+            ...f,
+            evidenceStatus: f.evidenceStatus.toLowerCase(),
+          })),
+        }
+      : {}),
+    ...(media ? { evidence: media.map(publicEvidenceView) } : {}),
   };
 }
 
@@ -129,7 +186,7 @@ export class ProjectsService {
       },
     });
     if (!project) throw new NotFoundException('Project not found');
-    return projectView(project);
+    return publicProjectView(project);
   }
 
   async getAdmin(id: string) {

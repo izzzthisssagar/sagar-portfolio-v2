@@ -74,9 +74,29 @@ export function articleJsonLd(
   };
 }
 
+/**
+ * `JSON.stringify` never escapes `<`, so a raw value containing `</script>` (e.g. attacker input
+ * echoed into a Person/Article JSON-LD field) would prematurely close the script element in the
+ * server-rendered HTML and let an attacker-controlled `<script>` that follows execute. Escaping
+ * `<` as `<` — a standard JSON escape sequence, valid inside a JSON string and restored to
+ * `<` by any JSON.parse — closes that off without changing the decoded value. U+2028/U+2029
+ * (line/paragraph separator) are escaped too: valid in JSON text but treated as line terminators
+ * by some JS parsers, which has historically broken inline `<script>` bodies that assume a single
+ * expression/statement.
+ */
+function safeJsonLdStringify(data: object): string {
+  return JSON.stringify(data)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 /** Renders a JSON-LD `<script>` tag. Server-only — call from a Server Component. */
 export function JsonLd({ data }: { data: object }) {
   return (
-    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: safeJsonLdStringify(data) }}
+    />
   );
 }

@@ -121,7 +121,7 @@ function aliasMatches(claimed: string, detected: string): boolean {
 }
 
 export function storageKey(
-  prefix: 'quarantine' | 'approved' | 'archived',
+  prefix: 'quarantine' | 'approved' | 'archived' | 'trash',
   sha256: string,
   extension: string,
 ): string {

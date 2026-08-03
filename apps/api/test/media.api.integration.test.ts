@@ -125,7 +125,7 @@ databaseSuite('Media pipeline: upload, validation, quarantine, approval', () => 
     expect(approved.body.data.storageKey).toMatch(/^approved\//);
   });
 
-  it('serves an approved asset publicly with immutable, ETag-validated caching', async () => {
+  it('serves an approved image publicly with revocation-safe, ETag-validated caching', async () => {
     const buffer = await pngBuffer('#00ffff');
     const uploaded = await request(server())
       .post('/api/v1/admin/media')
@@ -140,11 +140,82 @@ databaseSuite('Media pipeline: upload, validation, quarantine, approval', () => 
       .expect(201);
 
     const first = await request(server()).get(`/api/v1/media/${id}/file`).expect(200);
-    expect(first.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    // Not immutable/one-year — a database id, not a content hash, so the asset behind it can be
+    // archived (revoking public availability) at any time; must-revalidate forces every repeat
+    // request back to the origin instead of serving a revoked asset stale from a shared cache.
+    expect(first.headers['cache-control']).toBe('public, max-age=0, must-revalidate');
+    expect(first.headers['cache-control']).not.toContain('immutable');
     const etag = first.headers.etag as string;
     expect(etag).toBeTruthy();
 
+    // Still-approved: a conditional request short-circuits to 304 without re-streaming.
     await request(server()).get(`/api/v1/media/${id}/file`).set('If-None-Match', etag).expect(304);
+
+    // Archived: the exact same URL immediately 404s — no stale authorization/caching keeps
+    // serving a since-revoked asset, with or without the previously-valid ETag.
+    await request(server()).post(`/api/v1/admin/media/${id}/archive`).set(auth()).expect(201);
+    await request(server()).get(`/api/v1/media/${id}/file`).expect(404);
+    await request(server()).get(`/api/v1/media/${id}/file`).set('If-None-Match', etag).expect(404);
+  });
+
+  it('404s a quarantined, rejected, or archived image from the public file route', async () => {
+    const quarantined = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', await pngBuffer('#101010'), { filename: 'q.png', contentType: 'image/png' })
+      .expect(201);
+    await request(server()).get(`/api/v1/media/${quarantined.body.data.id}/file`).expect(404);
+
+    const rejected = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', await pngBuffer('#202020'), { filename: 'r.png', contentType: 'image/png' })
+      .expect(201);
+    await request(server())
+      .post(`/api/v1/admin/media/${rejected.body.data.id}/reject`)
+      .set(auth())
+      .send({ reason: 'Not relevant.' })
+      .expect(201);
+    await request(server()).get(`/api/v1/media/${rejected.body.data.id}/file`).expect(404);
+
+    const archived = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', await pngBuffer('#303030'), { filename: 'a.png', contentType: 'image/png' })
+      .expect(201);
+    await request(server())
+      .post(`/api/v1/admin/media/${archived.body.data.id}/approve`)
+      .set(auth())
+      .send({ altText: 'Archived-image test fixture.' })
+      .expect(201);
+    await request(server())
+      .post(`/api/v1/admin/media/${archived.body.data.id}/archive`)
+      .set(auth())
+      .expect(201);
+    await request(server()).get(`/api/v1/media/${archived.body.data.id}/file`).expect(404);
+  });
+
+  it('404s an approved PDF document from the generic public file route', async () => {
+    const pdf = Buffer.from(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF',
+      'latin1',
+    );
+    const uploaded = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', pdf, { filename: 'generic-route.pdf', contentType: 'application/pdf' })
+      .expect(201);
+    const id = uploaded.body.data.id as string;
+    await request(server())
+      .post(`/api/v1/admin/media/${id}/approve`)
+      .set(auth())
+      .send({ decorative: true })
+      .expect(201);
+
+    // Approved, but a document — the generic media route only ever serves images. The admin
+    // route can still stream it (behind auth), and the CV route is the only public path to a PDF.
+    await request(server()).get(`/api/v1/media/${id}/file`).expect(404);
+    await request(server()).get(`/api/v1/admin/media/${id}/file`).set(auth()).expect(200);
   });
 
   it('short-circuits a duplicate upload by checksum instead of creating a second row', async () => {

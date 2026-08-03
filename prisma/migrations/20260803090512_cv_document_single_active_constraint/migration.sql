@@ -1,0 +1,11 @@
+-- Enforce "at most one active CvDocument" at the database level, not just in application code.
+-- A partial unique index on (active) that only applies where active = true: any number of
+-- inactive rows can coexist, but two concurrent activations can never both commit as active —
+-- the second one's transaction fails the unique constraint and must retry. This closes the gap
+-- an application-only `updateMany` + `update` pair leaves open under concurrent initial
+-- activations (both requests read "no row is active" before either writes).
+--
+-- Not representable directly in schema.prisma (Prisma's schema language has no partial-index
+-- syntax) — this migration is the sole source of truth for the constraint; see the CvDocument
+-- model comment in schema.prisma.
+CREATE UNIQUE INDEX "CvDocument_one_active_key" ON "CvDocument" ("active") WHERE "active" = true;

@@ -75,14 +75,17 @@ export class MediaService {
     return { buffer, mimeType: media.mimeType, filename: media.filename };
   }
 
-  /** Public counterpart to `getFile` — returns null (never throws) for anything that isn't
-   * APPROVED, so `PublicMediaController` can 404 without distinguishing "doesn't exist" from
-   * "exists but not public" to the caller. */
+  /** Public counterpart to `getFile` — returns null (never throws) for anything that isn't an
+   * APPROVED **image**, so `PublicMediaController` can 404 without distinguishing "doesn't exist"
+   * from "exists but not public" from "exists but is a document" to the caller. Documents (the
+   * CV PDF) are never served through this generic route — only through
+   * `GET /api/v1/documents/cv`, which additionally requires the CvDocument to be the active one. */
   async getApprovedFile(
     id: string,
   ): Promise<{ buffer: Buffer; mimeType: string; filename: string; sha256: string } | null> {
     const media = await this.prisma.mediaAsset.findUnique({ where: { id } });
-    if (!media || media.status !== MediaStatus.APPROVED) return null;
+    if (!media || media.status !== MediaStatus.APPROVED || media.category !== MediaCategory.IMAGE)
+      return null;
     const buffer = await this.storage.get(media.storageKey);
     return { buffer, mimeType: media.mimeType, filename: media.filename, sha256: media.sha256 };
   }
@@ -118,38 +121,65 @@ export class MediaService {
     const key = storageKey('quarantine', sha256, extension);
     await this.storage.put(key, body, mimeType);
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const media = await tx.mediaAsset.create({
-        data: {
-          filename: normalizeFilenameForDisplay(file.originalname),
-          storageKey: key,
-          mimeType,
-          extension,
-          category,
-          byteSize: body.byteLength,
-          sha256,
-          status: MediaStatus.QUARANTINED,
-          ...(width !== undefined ? { width } : {}),
-          ...(height !== undefined ? { height } : {}),
-          ...(actorId ? { createdById: actorId } : {}),
-        },
+    let created;
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
+        const media = await tx.mediaAsset.create({
+          data: {
+            filename: normalizeFilenameForDisplay(file.originalname),
+            storageKey: key,
+            mimeType,
+            extension,
+            category,
+            byteSize: body.byteLength,
+            sha256,
+            status: MediaStatus.QUARANTINED,
+            ...(width !== undefined ? { width } : {}),
+            ...(height !== undefined ? { height } : {}),
+            ...(actorId ? { createdById: actorId } : {}),
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            action: 'MEDIA_UPLOADED',
+            resource: 'MediaAsset',
+            resourceId: media.id,
+            ...(actorId ? { actorId } : {}),
+            metadata: { category, mimeType, byteSize: body.byteLength },
+          },
+        });
+        return media;
       });
-      await tx.auditLog.create({
-        data: {
-          action: 'MEDIA_UPLOADED',
-          resource: 'MediaAsset',
-          resourceId: media.id,
-          ...(actorId ? { actorId } : {}),
-          metadata: { category, mimeType, byteSize: body.byteLength },
-        },
-      });
-      return media;
-    });
+    } catch (error) {
+      // The database side of the upload never landed — the quarantine object it would have
+      // pointed to must not survive as a storage orphan with no row. Best-effort: if this
+      // secondary cleanup itself fails, the original database error is still the one that
+      // propagates (that's what makes the failure visible and the whole upload retryable).
+      await this.storage.delete(key).catch(() => {});
+      throw error;
+    }
     return mediaView(created);
   }
 
   async update(id: string, input: UpdateMediaDto, actorId?: string) {
-    await this.get(id);
+    const current = await this.prisma.mediaAsset.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Media asset not found');
+    // An APPROVED image is already live somewhere public (portrait, featured image, or project
+    // evidence) — an edit must not leave it non-decorative with no alt text, the same invariant
+    // `approve()` enforces at approval time. A PATCH that only touches an unrelated field (e.g.
+    // `caption`) still merges against the *current* altText/decorative, so it can't accidentally
+    // slip through by omitting them.
+    if (current.category === MediaCategory.IMAGE && current.status === MediaStatus.APPROVED) {
+      const nextDecorative = input.decorative ?? current.decorative;
+      const nextAltText = input.altText !== undefined ? input.altText : current.altText;
+      if (!nextDecorative && !nextAltText?.trim()) {
+        throw new BadRequestException({
+          code: 'MEDIA_ALT_TEXT_REQUIRED',
+          message:
+            'An approved, content-bearing image must keep alt text (or be marked decorative).',
+        });
+      }
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       const media = await tx.mediaAsset.update({ where: { id }, data: { ...input } });
       await tx.auditLog.create({
@@ -185,27 +215,36 @@ export class MediaService {
     // Move the object before touching the database — if the move fails, the row stays
     // QUARANTINED rather than recording an approval that isn't actually servable.
     await this.storage.move(media.storageKey, nextKey);
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.mediaAsset.update({
-        where: { id },
-        data: {
-          status: MediaStatus.APPROVED,
-          approvedAt: new Date(),
-          storageKey: nextKey,
-          ...(input.altText !== undefined ? { altText: input.altText } : {}),
-          ...(input.decorative !== undefined ? { decorative: input.decorative } : {}),
-        },
+    let updated;
+    try {
+      updated = await this.prisma.$transaction(async (tx) => {
+        const next = await tx.mediaAsset.update({
+          where: { id },
+          data: {
+            status: MediaStatus.APPROVED,
+            approvedAt: new Date(),
+            storageKey: nextKey,
+            ...(input.altText !== undefined ? { altText: input.altText } : {}),
+            ...(input.decorative !== undefined ? { decorative: input.decorative } : {}),
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            action: 'MEDIA_APPROVED',
+            resource: 'MediaAsset',
+            resourceId: id,
+            ...(actorId ? { actorId } : {}),
+          },
+        });
+        return next;
       });
-      await tx.auditLog.create({
-        data: {
-          action: 'MEDIA_APPROVED',
-          resource: 'MediaAsset',
-          resourceId: id,
-          ...(actorId ? { actorId } : {}),
-        },
-      });
-      return next;
-    });
+    } catch (error) {
+      // The row is still QUARANTINED and still points at `media.storageKey` — the object must
+      // move back there (undoing the transition above) so the row and the storage layer agree
+      // again, and the approval is retryable instead of leaving a QUARANTINED row that 404s.
+      await this.storage.move(nextKey, media.storageKey).catch(() => {});
+      throw error;
+    }
     return mediaView(updated);
   }
 
@@ -245,21 +284,29 @@ export class MediaService {
     }
     const nextKey = storageKey('archived', media.sha256, media.extension);
     await this.storage.move(media.storageKey, nextKey);
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.mediaAsset.update({
-        where: { id },
-        data: { status: MediaStatus.ARCHIVED, storageKey: nextKey },
+    let updated;
+    try {
+      updated = await this.prisma.$transaction(async (tx) => {
+        const next = await tx.mediaAsset.update({
+          where: { id },
+          data: { status: MediaStatus.ARCHIVED, storageKey: nextKey },
+        });
+        await tx.auditLog.create({
+          data: {
+            action: 'MEDIA_ARCHIVED',
+            resource: 'MediaAsset',
+            resourceId: id,
+            ...(actorId ? { actorId } : {}),
+          },
+        });
+        return next;
       });
-      await tx.auditLog.create({
-        data: {
-          action: 'MEDIA_ARCHIVED',
-          resource: 'MediaAsset',
-          resourceId: id,
-          ...(actorId ? { actorId } : {}),
-        },
-      });
-      return next;
-    });
+    } catch (error) {
+      // Same compensation as `approve()`: the row is still APPROVED and still points at the old
+      // key, so the object must move back to restore agreement between them.
+      await this.storage.move(nextKey, media.storageKey).catch(() => {});
+      throw error;
+    }
     return mediaView(updated);
   }
 
@@ -288,20 +335,34 @@ export class MediaService {
           'This media asset is attached to a project, post, portrait, or CV document. Detach it before deleting.',
       });
     }
-    // Storage delete first: if it fails, the DB row (and thus the still-quarantined/approved
-    // file) remains intact and retryable, rather than leaving an orphaned object with no
-    // database record.
-    await this.storage.delete(media.storageKey);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.mediaAsset.delete({ where: { id } });
-      await tx.auditLog.create({
-        data: {
-          action: 'MEDIA_DELETED',
-          resource: 'MediaAsset',
-          resourceId: id,
-          ...(actorId ? { actorId } : {}),
-        },
+    // Move to a private trash key first, rather than deleting outright: a trash key never
+    // matches `approved/`, so `publicUrl()` already treats it as unservable the instant it moves
+    // — no window where a still-referenced row points at a deleted object, and no window where
+    // the object stays publicly reachable after the row is gone. If the move itself fails,
+    // nothing has changed yet and the delete is simply retryable.
+    const trashKey = storageKey('trash', media.sha256, media.extension);
+    await this.storage.move(media.storageKey, trashKey);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.mediaAsset.delete({ where: { id } });
+        await tx.auditLog.create({
+          data: {
+            action: 'MEDIA_DELETED',
+            resource: 'MediaAsset',
+            resourceId: id,
+            ...(actorId ? { actorId } : {}),
+          },
+        });
       });
-    });
+    } catch (error) {
+      // The row still exists (still pointing at `media.storageKey`) — move the object back so it
+      // agrees with the row again, instead of leaving a live row over a missing file.
+      await this.storage.move(trashKey, media.storageKey).catch(() => {});
+      throw error;
+    }
+    // The database row is gone — the trashed object is now a pure orphan with nothing pointing
+    // at it (never public, since its key never matched `approved/`). Best-effort final cleanup;
+    // a failure here leaves an inert private object, not a correctness problem.
+    await this.storage.delete(trashKey).catch(() => {});
   }
 }

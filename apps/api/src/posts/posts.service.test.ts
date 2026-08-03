@@ -45,6 +45,11 @@ function setup() {
       findMany: vi.fn().mockResolvedValue([post]),
       count: vi.fn().mockResolvedValue(1),
     },
+    mediaAsset: {
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ id: 'media1', category: 'IMAGE', status: 'APPROVED' }),
+    },
     $transaction: vi.fn((value: unknown) =>
       typeof value === 'function'
         ? (value as (client: unknown) => unknown)(tx)
@@ -149,5 +154,84 @@ describe('PostsService', () => {
     await expect(service.update('post1', { excerpt: '' } as never, 'admin')).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  describe('featured image validation', () => {
+    it('rejects create when the featured image does not exist', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        service.create({
+          title: post.title,
+          slug: post.slug,
+          excerpt: post.excerpt,
+          body: post.body,
+          featuredImageId: 'missing',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects create when the featured image is a document (PDF)', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+        id: 'media1',
+        category: 'DOCUMENT',
+        status: 'APPROVED',
+      });
+      await expect(
+        service.create({
+          title: post.title,
+          slug: post.slug,
+          excerpt: post.excerpt,
+          body: post.body,
+          featuredImageId: 'media1',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects create when the featured image is not approved', async () => {
+      const { service, prisma } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+        id: 'media1',
+        category: 'IMAGE',
+        status: 'QUARANTINED',
+      });
+      await expect(
+        service.create({
+          title: post.title,
+          slug: post.slug,
+          excerpt: post.excerpt,
+          body: post.body,
+          featuredImageId: 'media1',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('accepts create with an approved image featured image', async () => {
+      const { service, tx } = setup();
+      await service.create({
+        title: post.title,
+        slug: post.slug,
+        excerpt: post.excerpt,
+        body: post.body,
+        featuredImageId: 'media1',
+      });
+      expect(tx.blogPost.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ featuredImageId: 'media1' }) }),
+      );
+    });
+
+    it('rejects update when the new featured image is invalid, without writing anything', async () => {
+      const { service, prisma, tx } = setup();
+      prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+        id: 'media2',
+        category: 'DOCUMENT',
+        status: 'APPROVED',
+      });
+      await expect(
+        service.update('post1', { featuredImageId: 'media2' }, 'admin'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.blogPost.update).not.toHaveBeenCalled();
+    });
   });
 });

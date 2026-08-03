@@ -14,6 +14,38 @@ const accessSecret = process.env.ACCESS_TOKEN_SECRET ?? '';
 const accessIssuer = process.env.ACCESS_TOKEN_ISSUER ?? '';
 const accessAudience = process.env.ACCESS_TOKEN_AUDIENCE ?? '';
 
+/** Recursively asserts none of `forbiddenKeys` appears as an own property anywhere in `value` —
+ * catches a forbidden field leaking at any nesting depth (e.g. a nested MediaAsset object), not
+ * just at the top level of the shape being asserted against. */
+function assertNoForbiddenKeysDeep(value: unknown, forbiddenKeys: string[], path = '$'): void {
+  if (value === null || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertNoForbiddenKeysDeep(item, forbiddenKeys, `${path}[${index}]`),
+    );
+    return;
+  }
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (forbiddenKeys.includes(key)) {
+      throw new Error(`Forbidden key "${key}" found at ${path}.${key}`);
+    }
+    assertNoForbiddenKeysDeep(nested, forbiddenKeys, `${path}.${key}`);
+  }
+}
+
+const FORBIDDEN_PUBLIC_EVIDENCE_FIELDS = [
+  'media',
+  'storageKey',
+  'sha256',
+  'createdById',
+  'metadata',
+  'rejectionReason',
+  'createdAt',
+  'updatedAt',
+  'projectId',
+  'sourceNote',
+];
+
 databaseSuite(
   'Project evidence: approved-only attachment, public confirmed-only visibility',
   () => {
@@ -118,6 +150,74 @@ databaseSuite(
         .set(auth())
         .send({ mediaId: uploaded.body.data.id, evidenceStatus: 'pending', order: 0 })
         .expect(400);
+    });
+
+    it('rejects attaching an approved PDF document as evidence', async () => {
+      const projectId = await createPublishableProject(`${prefix}pdf-rejected`);
+      const pdf = Buffer.from(
+        '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF',
+        'latin1',
+      );
+      const uploaded = await request(server())
+        .post('/api/v1/admin/media')
+        .set(auth())
+        .attach('file', pdf, { filename: 'not-evidence.pdf', contentType: 'application/pdf' })
+        .expect(201);
+      const pdfId = uploaded.body.data.id as string;
+      await request(server())
+        .post(`/api/v1/admin/media/${pdfId}/approve`)
+        .set(auth())
+        .send({ decorative: true })
+        .expect(201);
+
+      const response = await request(server())
+        .post(`/api/v1/admin/projects/${projectId}/evidence`)
+        .set(auth())
+        .send({ mediaId: pdfId, evidenceStatus: 'confirmed', order: 0 })
+        .expect(400);
+      expect(response.body.error.code).toBe('EVIDENCE_REQUIRES_IMAGE');
+    });
+
+    it('exposes only the public evidence shape — no nested MediaAsset, storageKey, sha256, createdById, metadata, rejectionReason, or internal timestamps', async () => {
+      const projectId = await createPublishableProject(`${prefix}public-shape`);
+      const confirmedMediaId = await uploadAndApprove('#abcdef');
+      await request(server())
+        .post(`/api/v1/admin/projects/${projectId}/evidence`)
+        .set(auth())
+        .send({
+          mediaId: confirmedMediaId,
+          evidenceStatus: 'confirmed',
+          order: 0,
+          title: 'Public shape check',
+          caption: 'A caption.',
+          sourceNote: 'Internal-only sourcing note.',
+        })
+        .expect(201);
+      const slug = `${prefix}public-shape`;
+      await request(server())
+        .post(`/api/v1/admin/projects/${projectId}/workflow`)
+        .set(auth())
+        .send({ transition: 'publish' })
+        .expect(201);
+
+      const publicView = await request(server()).get(`/api/v1/projects/${slug}`).expect(200);
+      const [evidence] = publicView.body.data.evidence;
+      expect(Object.keys(evidence).sort()).toEqual(
+        ['id', 'mediaId', 'title', 'caption', 'altText', 'evidenceStatus', 'order'].sort(),
+      );
+      expect(evidence.sourceNote).toBeUndefined();
+      expect(() =>
+        assertNoForbiddenKeysDeep(publicView.body.data.evidence, FORBIDDEN_PUBLIC_EVIDENCE_FIELDS),
+      ).not.toThrow();
+
+      // The admin/CMS shape, by contrast, still carries the nested MediaAsset — proving the
+      // restriction is public-only, not a regression of CMS functionality.
+      const adminView = await request(server())
+        .get(`/api/v1/admin/projects/${projectId}`)
+        .set(auth())
+        .expect(200);
+      expect(adminView.body.data.evidence[0].media).toBeDefined();
+      expect(adminView.body.data.evidence[0].media.storageKey).toBeDefined();
     });
 
     it('attaches approved media, and only CONFIRMED evidence is visible on the published project publicly', async () => {

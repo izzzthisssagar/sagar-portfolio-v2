@@ -201,6 +201,27 @@ databaseSuite('Portrait and CV management', () => {
       await request(server()).delete(`/api/v1/admin/media/${mediaId}`).set(auth()).expect(409);
       await request(server()).delete('/api/v1/admin/profile/portrait').set(auth()).expect(200);
     });
+
+    it('refuses to clear the alt text of an approved, non-decorative active portrait', async () => {
+      const mediaId = await uploadApprovedImage();
+      await request(server())
+        .post('/api/v1/admin/profile/portrait')
+        .set(auth())
+        .send({ mediaId })
+        .expect(201);
+      await request(server())
+        .patch(`/api/v1/admin/media/${mediaId}`)
+        .set(auth())
+        .send({ altText: '' })
+        .expect(400);
+      // Marking it decorative instead is accepted — the invariant is "alt text OR decorative".
+      await request(server())
+        .patch(`/api/v1/admin/media/${mediaId}`)
+        .set(auth())
+        .send({ altText: '', decorative: true })
+        .expect(200);
+      await request(server()).delete('/api/v1/admin/profile/portrait').set(auth()).expect(200);
+    });
   });
 
   describe('CV', () => {
@@ -264,6 +285,81 @@ databaseSuite('Portrait and CV management', () => {
 
       await request(server()).delete(`/api/v1/admin/cv/${b.body.data.id}`).set(auth()).expect(409);
       await request(server()).delete(`/api/v1/admin/cv/${a.body.data.id}`).set(auth()).expect(200);
+    });
+
+    it('never serves the CV document through the generic public media route, active or not', async () => {
+      const pdfA = await uploadApprovedPdf('generic-route-a.pdf');
+      const pdfB = await uploadApprovedPdf('generic-route-b.pdf');
+      const a = await request(server())
+        .post('/api/v1/admin/cv')
+        .set(auth())
+        .send({ mediaId: pdfA, title: 'Generic Route CV A' })
+        .expect(201);
+      const b = await request(server())
+        .post('/api/v1/admin/cv')
+        .set(auth())
+        .send({ mediaId: pdfB, title: 'Generic Route CV B' })
+        .expect(201);
+      await request(server())
+        .post(`/api/v1/admin/cv/${a.body.data.id}/activate`)
+        .set(auth())
+        .expect(201);
+      await request(server())
+        .post(`/api/v1/admin/cv/${b.body.data.id}/activate`)
+        .set(auth())
+        .expect(201);
+      // b is now active, a is inactive — neither PDF is reachable through /media/:id/file,
+      // regardless of which CvDocument it backs; only /documents/cv serves the active one.
+      await request(server()).get(`/api/v1/media/${pdfA}/file`).expect(404);
+      await request(server()).get(`/api/v1/media/${pdfB}/file`).expect(404);
+      await request(server()).get('/api/v1/documents/cv').expect(200);
+
+      await request(server()).delete(`/api/v1/admin/cv/${a.body.data.id}`).set(auth()).expect(200);
+      await request(server()).delete(`/api/v1/admin/cv/${b.body.data.id}`).set(auth()).expect(409);
+    });
+
+    it('activates exactly one of two CV documents when activated concurrently from an inactive start', async () => {
+      const pdfA = await uploadApprovedPdf('concurrent-a.pdf');
+      const pdfB = await uploadApprovedPdf('concurrent-b.pdf');
+      const a = await request(server())
+        .post('/api/v1/admin/cv')
+        .set(auth())
+        .send({ mediaId: pdfA, title: 'Concurrent CV A' })
+        .expect(201);
+      const b = await request(server())
+        .post('/api/v1/admin/cv')
+        .set(auth())
+        .send({ mediaId: pdfB, title: 'Concurrent CV B' })
+        .expect(201);
+
+      // Both start inactive. Fire both activations at once — the DB-level partial unique index
+      // on CvDocument(active) WHERE active is what actually prevents both from landing active;
+      // the application-level updateMany+update pair alone can't (both can observe "nothing is
+      // active" before either commits).
+      const [resA, resB] = await Promise.all([
+        request(server()).post(`/api/v1/admin/cv/${a.body.data.id}/activate`).set(auth()),
+        request(server()).post(`/api/v1/admin/cv/${b.body.data.id}/activate`).set(auth()),
+      ]);
+      const statuses = [resA.status, resB.status].sort();
+      // Either exactly one succeeds and the other is rejected as a conflict, or the two
+      // transactions serialize cleanly and both return success (Postgres resolves the pending
+      // insert conflict by waiting rather than only ever erroring) — either way, never two 500s
+      // and never two silently-successful activations.
+      expect(statuses.every((s) => s === 201 || s === 409)).toBe(true);
+
+      const list = await request(server()).get('/api/v1/admin/cv').set(auth()).expect(200);
+      const activeRows = list.body.data.filter((d: { active: boolean }) => d.active);
+      expect(activeRows).toHaveLength(1);
+
+      const activeId = activeRows[0].id as string;
+      const download = await request(server()).get('/api/v1/documents/cv').expect(200);
+      expect(download.headers['content-type']).toBe('application/pdf');
+
+      const otherId = activeId === a.body.data.id ? b.body.data.id : a.body.data.id;
+      // No partial activation state: the still-inactive row has no dangling in-progress marker,
+      // it's simply inactive and deletable; the active one is still protected from deletion.
+      await request(server()).delete(`/api/v1/admin/cv/${otherId}`).set(auth()).expect(200);
+      await request(server()).delete(`/api/v1/admin/cv/${activeId}`).set(auth()).expect(409);
     });
   });
 });
