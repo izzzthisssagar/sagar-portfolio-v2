@@ -9,12 +9,14 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { type AdminRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CsrfGuard } from '../auth/csrf.guard';
@@ -37,6 +39,25 @@ export class AdminMediaController {
 
   @Get(':id') async get(@Param('id') id: string) {
     return { data: await this.media.get(id) };
+  }
+
+  /** Streams the raw bytes for the admin preview UI — works for any status (quarantined,
+   * rejected, approved, archived), unlike the public delivery route, and stays behind
+   * JwtAuthGuard rather than becoming a guessable public URL.
+   *
+   * Takes full manual control of the response (`@Res()` with no `passthrough`) rather than
+   * returning the buffer — Nest's default response handling JSON-serializes any returned value
+   * that isn't a string/stream, and `Buffer.prototype.toJSON` turns binary data into
+   * `{ type: "Buffer", data: [...] }`, which is not what an `<img src>` or PDF viewer expects. */
+  @Get(':id/file') async file(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, mimeType, filename } = await this.media.getFile(id);
+    res
+      .set({
+        'Content-Type': mimeType,
+        'Content-Disposition': `inline; filename="${filename.replace(/"/g, '')}"`,
+        'Cache-Control': 'private, no-store',
+      })
+      .send(buffer);
   }
 
   @Post()

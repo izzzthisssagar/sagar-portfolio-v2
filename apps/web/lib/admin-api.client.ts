@@ -74,7 +74,11 @@ async function apiFetchRaw(
     const csrf = readCsrfToken();
     if (csrf) headers.set('X-CSRF-Token', csrf);
   }
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  // A FormData body (multipart upload) must never get an explicit Content-Type — the browser
+  // sets it itself, including the multipart boundary. Only default to JSON for other bodies.
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -365,6 +369,109 @@ export const posts = {
       body: JSON.stringify({ transition }),
     }),
   remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/posts/${id}`, { method: 'DELETE' }),
+};
+
+export interface AdminMedia {
+  id: string;
+  filename: string;
+  storageKey: string;
+  mimeType: string;
+  extension: string;
+  category: 'image' | 'document';
+  byteSize: number;
+  sha256: string;
+  status: 'quarantined' | 'approved' | 'rejected' | 'archived';
+  altText: string | null;
+  decorative: boolean;
+  caption: string | null;
+  sourceNote: string | null;
+  rejectionReason: string | null;
+  width: number | null;
+  height: number | null;
+  createdById: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  createdAt: string;
+}
+
+export interface MediaListResult {
+  data: AdminMedia[];
+  meta: { page: number; limit: number; total: number };
+}
+
+export interface MediaListQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: AdminMedia['status'];
+  category?: AdminMedia['category'];
+}
+
+export interface MediaUpdateInput {
+  altText?: string;
+  decorative?: boolean;
+  caption?: string;
+  sourceNote?: string;
+}
+
+/** XMLHttpRequest, not fetch — this is the one call site that needs real upload-progress events,
+ * which fetch has no API for. Mirrors apiFetchRaw's auth/CSRF/error-envelope handling by hand. */
+function uploadMediaFile(file: File, onProgress?: (fraction: number) => void): Promise<AdminMedia> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_URL}/admin/media`);
+    xhr.withCredentials = true;
+    const csrf = readCsrfToken();
+    if (csrf) xhr.setRequestHeader('X-CSRF-Token', csrf);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      let payload: { data?: AdminMedia; error?: { code?: string; message?: string } } | null = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        payload = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && payload?.data) {
+        resolve(payload.data);
+      } else {
+        reject(
+          new ApiError(
+            xhr.status,
+            payload?.error?.code ?? 'UNKNOWN',
+            payload?.error?.message ?? 'Upload failed.',
+          ),
+        );
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'NETWORK_ERROR', 'Upload failed — network error.'));
+    const form = new FormData();
+    form.append('file', file);
+    xhr.send(form);
+  });
+}
+
+export const media = {
+  list: (query: MediaListQuery = {}) =>
+    apiFetchRaw(`/admin/media${toQueryString({ ...query })}`) as Promise<MediaListResult>,
+  get: (id: string) => apiFetch<AdminMedia>(`/admin/media/${id}`),
+  fileUrl: (id: string) => `${API_URL}/admin/media/${id}/file`,
+  upload: uploadMediaFile,
+  update: (id: string, input: MediaUpdateInput) =>
+    apiFetch<AdminMedia>(`/admin/media/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  approve: (id: string, input: { altText?: string; decorative?: boolean } = {}) =>
+    apiFetch<AdminMedia>(`/admin/media/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  reject: (id: string, reason: string) =>
+    apiFetch<AdminMedia>(`/admin/media/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  archive: (id: string) => apiFetch<AdminMedia>(`/admin/media/${id}/archive`, { method: 'POST' }),
+  remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/media/${id}`, { method: 'DELETE' }),
 };
 
 export interface DashboardSummary {

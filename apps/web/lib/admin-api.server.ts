@@ -2,11 +2,13 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import type {
   AdminFinding,
+  AdminMedia,
   AdminMetric,
   AdminPost,
   AdminProject,
   AdminSession,
   DashboardSummary,
+  MediaListResult,
   PostListResult,
   ProjectListResult,
 } from './admin-api.client';
@@ -47,5 +49,8 @@ export const adminServer = {
   listPosts: (qs = ''): Promise<PostListResult | null> =>
     adminFetchRaw(`/admin/posts${qs}`) as Promise<PostListResult | null>,
   getPost: (id: string): Promise<AdminPost | null> => adminFetch(`/admin/posts/${id}`),
+  listMedia: (qs = ''): Promise<MediaListResult | null> =>
+    adminFetchRaw(`/admin/media${qs}`) as Promise<MediaListResult | null>,
+  getMedia: (id: string): Promise<AdminMedia | null> => adminFetch(`/admin/media/${id}`),
   dashboard: (): Promise<DashboardSummary | null> => adminFetch('/admin/dashboard'),
 };

@@ -64,6 +64,17 @@ export class MediaService {
     return mediaView(media);
   }
 
+  /** Admin-only preview stream — deliberately separate from the public delivery route (which
+   * only ever serves APPROVED assets, unauthenticated, with different caching/header rules). An
+   * administrator reviewing the quarantine queue needs to see a still-QUARANTINED or REJECTED
+   * file too, behind JwtAuthGuard, never behind a public URL. */
+  async getFile(id: string): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+    const media = await this.prisma.mediaAsset.findUnique({ where: { id } });
+    if (!media) throw new NotFoundException('Media asset not found');
+    const buffer = await this.storage.get(media.storageKey);
+    return { buffer, mimeType: media.mimeType, filename: media.filename };
+  }
+
   async upload(file: { buffer: Buffer; originalname: string; mimetype: string }, actorId?: string) {
     const result = await validateUpload(file.buffer, file.originalname, file.mimetype);
     if (!result.ok) {
