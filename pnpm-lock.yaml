@@ -158,6 +158,9 @@ importers:
       eslint-config-prettier:
         specifier: 10.1.8
         version: 10.1.8(eslint@9.39.1(jiti@2.7.0)(supports-color@8.1.1))
+      express:
+        specifier: 5.2.1
+        version: 5.2.1(supports-color@8.1.1)
       supertest:
         specifier: 7.1.4
         version: 7.1.4(supports-color@8.1.1)

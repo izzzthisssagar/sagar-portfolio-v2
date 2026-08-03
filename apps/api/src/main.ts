@@ -21,12 +21,18 @@ export async function bootstrap() {
   // without this, registerGracefulShutdown's app.close() would stop accepting requests but
   // never actually close the database connection.
   app.enableShutdownHooks();
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Sagar Portfolio API')
-    .setVersion('1')
-    .addBearerAuth()
-    .build();
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  // Never mounted in production — an admin API's full route/schema map is not something to
+  // expose at a public URL, and Swagger UI's own bundled inline script is incompatible with the
+  // strict script-src the production CSP enforces everywhere else (see security-headers.ts).
+  // Available in every other environment for local/staging convenience.
+  if (env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Sagar Portfolio API')
+      .setVersion('1')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  }
   await app.listen(env.PORT);
   registerGracefulShutdown(app, { gracePeriodMs: env.SHUTDOWN_GRACE_PERIOD_MS });
   return app;
