@@ -26,14 +26,26 @@ shared NAT.
 
 ## Tokens
 
-**Access token** — HS256 JWT, `sub` = administrator id, `role: admin`, issuer/audience validated,
-15-minute (`ACCESS_TOKEN_SECONDS`) lifetime. `apps/api/src/auth/jwt-config.ts` is the single place
-that loads and validates `ACCESS_TOKEN_SECRET` / `_ISSUER` / `_AUDIENCE`; a missing, short, or
-placeholder (`replace-...`) secret makes it return `null`, and every caller (the API's
-`JwtAuthGuard`, `AuthService`) fails closed rather than accepting an unverifiable token. The
-Next.js server boundary (`apps/web/lib/admin-auth.server.ts`) re-implements the same checks with
-`jose` because it runs on a different runtime (Edge middleware) — this is Sprint 1 architecture,
-kept as-is.
+**Access token** — HS256 JWT, `sub` = administrator id, `role: admin`, `tokenVersion` (see below),
+issuer/audience validated, 15-minute (`ACCESS_TOKEN_SECONDS`) lifetime.
+`apps/api/src/auth/jwt-config.ts` is the single place that loads and validates
+`ACCESS_TOKEN_SECRET` / `_ISSUER` / `_AUDIENCE`; a missing, short, or placeholder (`replace-...`)
+secret makes it return `null`, and every caller (the API's `JwtAuthGuard`, `AuthService`) fails
+closed rather than accepting an unverifiable token. The Next.js server boundary
+(`apps/web/lib/admin-auth.server.ts`) re-implements the signature/expiry/issuer/audience checks
+with `jose` because it runs on a different runtime (Edge middleware) — this is Sprint 1
+architecture, kept as-is. It does **not** check `tokenVersion` (no DB access from that boundary),
+so it stays a coarse routing gate; `JwtAuthGuard` is the source of truth for whether a token is
+still valid, and every admin-authenticated API call goes through it.
+
+**Immediate revocation (`tokenVersion`)** — `AdminUser.tokenVersion` (default `0`) is embedded in
+every access token at sign time. `logout-all` increments it. `JwtAuthGuard` looks the current value
+up (one indexed primary-key read per authenticated request — negligible for a single-admin CMS)
+and rejects any token signed with an older version. This means `logout-all` invalidates every
+already-issued access token immediately, not just future refreshes — a still-unexpired 15-minute
+access token stops working on its very next authenticated API call after `logout-all`, rather than
+remaining valid until it naturally expires. Plain `logout` (single session) does not bump
+`tokenVersion` — it only revokes that session's refresh token, matching its narrower scope.
 
 **Refresh token** — a 48-byte random value (`AuthService.newRefreshToken`), never stored raw; only
 its SHA-256 hash lives in `RefreshSession.tokenHash`. Refresh rotates on every use: the old
@@ -46,15 +58,19 @@ compromised. Refresh sessions live `REFRESH_TOKEN_TTL_DAYS` (default 7) days.
 
 ## Cookies
 
-| Cookie              | Path           | HttpOnly | Contents                     |
-| ------------------- | -------------- | -------- | ---------------------------- |
-| `portfolio_access`  | `/`            | yes      | the access JWT               |
-| `portfolio_refresh` | `/api/v1/auth` | yes      | the raw refresh token        |
-| `portfolio_csrf`    | `/`            | **no**   | a random double-submit value |
+| Cookie              | Path | HttpOnly | Contents                     |
+| ------------------- | ---- | -------- | ---------------------------- |
+| `portfolio_access`  | `/`  | yes      | the access JWT               |
+| `portfolio_refresh` | `/`  | yes      | the raw refresh token        |
+| `portfolio_csrf`    | `/`  | **no**   | a random double-submit value |
 
-All three are `SameSite=Strict`, `Secure` in production. `portfolio_csrf` is deliberately
-JS-readable — double-submit tokens are not secrets, the cookie/header pairing is the defense (see
-below). `logout`/`logout-all` clear all three.
+All three are `SameSite=Strict`, `Secure` in production, path `/`. `portfolio_refresh` used to be
+scoped to `/api/v1/auth` on the theory that only auth endpoints need it; in practice the Next.js
+proxy middleware needs it on `/admin/*` requests to attempt a silent refresh before the CMS
+renders, and cookie-path matching is exact-prefix (not "same site"), so that narrower path meant
+the browser silently never sent the cookie there — the silent refresh could never actually run.
+`portfolio_csrf` is deliberately JS-readable — double-submit tokens are not secrets, the
+cookie/header pairing is the defense (see below). `logout`/`logout-all` clear all three.
 
 The browser calls the NestJS API directly (cross-origin from the Next.js origin, same-site) using
 `NEXT_PUBLIC_API_URL`; the cookie rides along because the deployment is same-site (see "Known

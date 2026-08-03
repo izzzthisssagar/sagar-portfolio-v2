@@ -37,6 +37,11 @@ model AdminUser {
   passwordHash     String
   failedLoginCount Int              @default(0)
   lockedUntil      DateTime?
+  /// Bumped by logout-all. Every access token carries the tokenVersion it
+  /// was signed with; JwtAuthGuard rejects a token whose version no longer
+  /// matches, so logout-all invalidates already-issued access tokens
+  /// immediately instead of only revoking refresh capability.
+  tokenVersion     Int              @default(0)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   sessions         RefreshSession[]

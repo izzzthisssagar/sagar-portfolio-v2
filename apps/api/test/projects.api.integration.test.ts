@@ -12,6 +12,7 @@ const databaseSuite = process.env.DATABASE_URL ? describe : describe.skip;
 const accessSecret = process.env.ACCESS_TOKEN_SECRET ?? '';
 const accessIssuer = process.env.ACCESS_TOKEN_ISSUER ?? '';
 const accessAudience = process.env.ACCESS_TOKEN_AUDIENCE ?? '';
+const adminEmail = 'publication-contract-admin@example.invalid';
 databaseSuite('Project publication API boundary', () => {
   let app: INestApplication;
   let prisma: PrismaService;
@@ -41,8 +42,14 @@ databaseSuite('Project publication API boundary', () => {
       });
       ids.set(status, record.id);
     }
+    // JwtAuthGuard checks the token's `sub` against a real AdminUser row and
+    // its tokenVersion — a token for a nonexistent admin id is now rejected.
+    await prisma.adminUser.deleteMany({ where: { email: adminEmail } });
+    const admin = await prisma.adminUser.create({
+      data: { email: adminEmail, passwordHash: 'not-used-in-this-suite' },
+    });
     adminToken = new JwtService().sign(
-      { sub: 'integration-admin', role: 'admin' },
+      { sub: admin.id, role: 'admin', tokenVersion: admin.tokenVersion },
       {
         secret: accessSecret,
         issuer: accessIssuer,
@@ -55,6 +62,7 @@ databaseSuite('Project publication API boundary', () => {
 
   afterAll(async () => {
     await prisma.project.deleteMany({ where: { slug: { startsWith: prefix } } });
+    await prisma.adminUser.deleteMany({ where: { email: adminEmail } });
     await app.close();
   });
 

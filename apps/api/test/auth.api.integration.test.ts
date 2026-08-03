@@ -4,6 +4,7 @@ import * as argon2 from 'argon2';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { hashRefreshToken } from '../src/auth/auth.service';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -137,6 +138,70 @@ databaseSuite('Authentication vertical', () => {
     expect(reuseAudit).toBeTruthy();
   });
 
+  it('lets exactly one of two simultaneous refreshes of the same token win, and revokes the rest of the family', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const loginCookies = login.headers['set-cookie'] as unknown as string[];
+    const csrfToken = cookieValue(loginCookies, 'portfolio_csrf')!;
+    const refreshToken = cookieValue(loginCookies, 'portfolio_refresh')!;
+    const cookieHeader = [`portfolio_refresh=${refreshToken}`, `portfolio_csrf=${csrfToken}`];
+
+    // Two genuinely concurrent requests presenting the identical,
+    // not-yet-rotated refresh token — the scenario a read-then-write
+    // rotation can't defend against, since both requests would read the
+    // same "still active" row before either commits its revoke.
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer())
+        .post('/api/v1/auth/refresh')
+        .set('Origin', WEB_URL)
+        .set('X-CSRF-Token', csrfToken)
+        .set('Cookie', cookieHeader),
+      request(app.getHttpServer())
+        .post('/api/v1/auth/refresh')
+        .set('Origin', WEB_URL)
+        .set('X-CSRF-Token', csrfToken)
+        .set('Cookie', cookieHeader),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    // Exactly one request wins the atomic claim and rotates; the other
+    // loses the race and is treated as reuse.
+    expect(statuses).toEqual([200, 401]);
+    const [winner, loser] = first.status === 200 ? [first, second] : [second, first];
+    expect(loser.body.error.code).toBe('SESSION_EXPIRED');
+
+    // The original session must have transitioned active -> revoked
+    // exactly once, and reuse detection must have revoked the winner's
+    // freshly-issued descendant too — no independently usable refresh
+    // token should survive this race.
+    const original = await prisma.refreshSession.findUnique({
+      where: { tokenHash: hashRefreshToken(refreshToken) },
+    });
+    expect(original?.revokedAt).toBeTruthy();
+    const winnerRefreshToken = cookieValue(
+      winner.headers['set-cookie'] as unknown as string[],
+      'portfolio_refresh',
+    )!;
+    const descendant = await prisma.refreshSession.findUnique({
+      where: { tokenHash: hashRefreshToken(winnerRefreshToken) },
+    });
+    expect(descendant?.revokedAt).toBeTruthy();
+    expect(
+      await prisma.refreshSession.count({
+        where: { userId: original!.userId, revokedAt: null },
+      }),
+    ).toBe(0);
+
+    const actions = (await prisma.auditLog.findMany({ orderBy: { createdAt: 'asc' } })).map(
+      (row) => row.action,
+    );
+    expect(actions.filter((a) => a === 'TOKEN_REFRESHED')).toHaveLength(1);
+    expect(actions.filter((a) => a === 'REFRESH_REUSE_DETECTED')).toHaveLength(1);
+  });
+
   it('logs out the current session without disturbing others, and logout-all revokes every session', async () => {
     const agent = request.agent(app.getHttpServer());
     const login = await agent
@@ -183,6 +248,39 @@ databaseSuite('Authentication vertical', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(204);
     expect(await prisma.refreshSession.count({ where: { revokedAt: null } })).toBe(0);
+  });
+
+  it('logout-all immediately invalidates an already-issued, still-unexpired access token', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const accessToken = cookieValue(
+      login.headers['set-cookie'] as unknown as string[],
+      'portfolio_access',
+    )!;
+
+    // The token is real, correctly signed, and not expired — it works
+    // right up until logout-all is called.
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout-all')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(204);
+
+    // Same still-unexpired token, immediately after logout-all: rejected.
+    // This is what distinguishes "revokes refresh capability" from
+    // "revokes this admin's access right now" — logout-all does the latter.
+    const rejected = await request(app.getHttpServer())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(401);
+    expect(rejected.body.error.message).toMatch(/administrator session required/i);
   });
 
   it('reports session info for an authenticated administrator', async () => {

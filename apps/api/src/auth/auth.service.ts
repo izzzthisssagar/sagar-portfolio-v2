@@ -68,11 +68,11 @@ export class AuthService {
     return { token, hash: hashRefreshToken(token) };
   }
 
-  private signAccessToken(adminId: string): string {
+  private signAccessToken(adminId: string, tokenVersion: number): string {
     const config = loadAccessTokenConfig();
     if (!config) throw new AuthNotProvisionedException();
     return this.jwt.sign(
-      { sub: adminId, role: 'admin' },
+      { sub: adminId, role: 'admin', tokenVersion },
       {
         secret: config.secret,
         issuer: config.issuer,
@@ -148,10 +148,18 @@ export class AuthService {
     });
     await this.audit('LOGIN_SUCCESS', admin.id, ip);
     return {
-      accessToken: this.signAccessToken(admin.id),
+      accessToken: this.signAccessToken(admin.id, admin.tokenVersion),
       refreshToken,
       admin: { id: admin.id, email: admin.email },
     };
+  }
+
+  private async revokeFamilyAsReuse(userId: string, now: Date, ip?: string) {
+    await this.prisma.refreshSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    await this.audit('REFRESH_REUSE_DETECTED', userId, ip);
   }
 
   async refresh(rawToken: string | undefined, ip?: string): Promise<SessionTokens> {
@@ -166,17 +174,27 @@ export class AuthService {
     const now = new Date();
 
     if (session.revokedAt) {
-      await this.prisma.refreshSession.updateMany({
-        where: { userId: session.userId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      await this.audit('REFRESH_REUSE_DETECTED', session.userId, ip);
+      await this.revokeFamilyAsReuse(session.userId, now, ip);
       throw new SessionExpiredException('Session revoked.');
     }
     if (session.expiresAt <= now) throw new SessionExpiredException();
 
     const { token: refreshToken, hash: newHash } = this.newRefreshToken();
-    await this.prisma.$transaction(async (tx) => {
+    // Atomic claim: the read above (`findUnique`) is not what makes rotation
+    // safe under concurrency — two requests presenting the same refresh
+    // token can both pass it. What makes rotation safe is this UPDATE.
+    // Under Postgres's default READ COMMITTED isolation, a second
+    // transaction's `UPDATE ... WHERE revokedAt IS NULL` targeting the same
+    // row blocks on the first transaction's row lock, then re-evaluates the
+    // WHERE clause against the just-committed row once the lock is
+    // released — so at most one of any number of concurrent callers can
+    // ever match and claim the session; every other caller sees `count: 0`.
+    const rotated = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.refreshSession.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      if (claim.count === 0) return null;
       const next = await tx.refreshSession.create({
         data: {
           tokenHash: newHash,
@@ -186,12 +204,26 @@ export class AuthService {
       });
       await tx.refreshSession.update({
         where: { id: session.id },
-        data: { revokedAt: now, replacedById: next.id },
+        data: { replacedById: next.id },
       });
+      return next;
     });
+
+    if (!rotated) {
+      // Lost the atomic claim: another request rotated this exact,
+      // not-yet-revoked session between our read and our claim attempt.
+      // Two independently usable holders of the same refresh token is
+      // exactly what reuse detection defends against, so this is handled
+      // identically to presenting an already-retired token — the whole
+      // session family (including whichever descendant just won the race)
+      // is revoked and the attempt is audited as a reuse event.
+      await this.revokeFamilyAsReuse(session.userId, now, ip);
+      throw new SessionExpiredException('Session revoked.');
+    }
+
     await this.audit('TOKEN_REFRESHED', session.userId, ip);
     return {
-      accessToken: this.signAccessToken(session.userId),
+      accessToken: this.signAccessToken(session.userId, session.user.tokenVersion),
       refreshToken,
       admin: { id: session.user.id, email: session.user.email },
     };
@@ -212,6 +244,15 @@ export class AuthService {
     await this.prisma.refreshSession.updateMany({
       where: { userId: adminId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+    // Bumping tokenVersion invalidates every access token already issued to
+    // this admin immediately — JwtAuthGuard rejects any token signed with an
+    // older version — not just future refreshes. Without this, a
+    // still-valid 15-minute access token would keep working after
+    // logout-all until it naturally expired.
+    await this.prisma.adminUser.update({
+      where: { id: adminId },
+      data: { tokenVersion: { increment: 1 } },
     });
     await this.audit('LOGOUT_ALL', adminId, ip);
   }
