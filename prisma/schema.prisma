@@ -197,8 +197,12 @@ model BlogPost {
   publishedAt     DateTime?
   seoTitle        String
   seoDescription  String
+  canonicalUrl    String?
+  displayOrder    Int               @default(0)
   socialImageId   String?
+  socialImage     MediaAsset?       @relation("BlogPostSocialImage", fields: [socialImageId], references: [id], onDelete: SetNull)
   featuredImageId String?
+  featuredImage   MediaAsset?       @relation("BlogPostFeaturedImage", fields: [featuredImageId], references: [id], onDelete: SetNull)
   categoryId      String
   category        BlogCategory      @relation(fields: [categoryId], references: [id])
   tags            BlogTag[]
@@ -207,6 +211,8 @@ model BlogPost {
   relatedTo       BlogPost[]        @relation("RelatedPosts")
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
+  @@index([status, publishedAt])
 }
 
 model BlogCategory {
@@ -277,20 +283,22 @@ model ContactMessage {
 }
 
 model MediaAsset {
-  id         String         @id @default(cuid())
-  filename   String
-  storageKey String         @unique
-  mimeType   String
-  extension  String
-  byteSize   Int
-  sha256     String
-  status     MediaStatus    @default(QUARANTINED)
-  altText    String?
-  width      Int?
-  height     Int?
-  durationMs Int?
-  createdAt  DateTime       @default(now())
-  projects   ProjectMedia[]
+  id          String         @id @default(cuid())
+  filename    String
+  storageKey  String         @unique
+  mimeType    String
+  extension   String
+  byteSize    Int
+  sha256      String
+  status      MediaStatus    @default(QUARANTINED)
+  altText     String?
+  width       Int?
+  height      Int?
+  durationMs  Int?
+  createdAt   DateTime       @default(now())
+  projects    ProjectMedia[]
+  socialFor   BlogPost[]     @relation("BlogPostSocialImage")
+  featuredFor BlogPost[]     @relation("BlogPostFeaturedImage")
 }
 
 model SiteSetting {
