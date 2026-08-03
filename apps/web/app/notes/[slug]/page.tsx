@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { renderMarkdown } from '@/lib/markdown';
 import { getPublishedPostBySlug, getPublishedPosts } from '@/lib/public-content.server';
+import { articleJsonLd, JsonLd } from '@/lib/seo';
 
 export async function generateStaticParams() {
   const notes = await getPublishedPosts();
@@ -27,6 +28,11 @@ export async function generateMetadata({
       url: canonical,
       type: 'article',
     },
+    twitter: {
+      card: 'summary_large_image',
+      title: note.title,
+      description: note.excerpt,
+    },
   };
 }
 
@@ -36,6 +42,7 @@ export default async function Note({ params }: { params: Promise<{ slug: string 
   if (!note) notFound();
   return (
     <main id="main" className="page-shell">
+      <JsonLd data={articleJsonLd(note)} />
       <article className="container">
         <p className="eyebrow">Field Notes / {note.readingTime} min</p>
         <h1 className="display">{note.title}</h1>

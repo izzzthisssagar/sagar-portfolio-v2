@@ -1,10 +1,10 @@
 # Media pipeline
 
-Status: **design-only** as of this doc's last update — not yet implemented. `MediaAsset` exists in
-the schema (Sprint 1) and the dashboard already counts `QUARANTINED` rows, but no controller,
-service, storage adapter, or admin UI exists yet. This doc records the committed design so
-implementation (tracked separately) has a single source of truth, and so nothing here is confused
-with shipped behavior. Update the status line above once the vertical lands.
+Status: **implemented** — storage adapters (local + S3-compatible, fail-closed in production),
+upload/validation pipeline, quarantine/approve/reject workflow, admin media library, and the public
+delivery route are all live. Public delivery is cached as immutable with a SHA-256 ETag (content
+is content-addressed, so a given asset id never changes bytes) — see `docs/seo.md` for the Phase 18
+hardening details.
 
 ## Security model
 

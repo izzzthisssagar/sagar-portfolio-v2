@@ -55,8 +55,8 @@ than in one cross-cutting pass, so each phase ships in a working state:
 3. **Project evidence, portrait, CV** — built on top of the media pipeline.
 4. **Contact** — message persistence, delivery adapter, CMS inbox, public form. See
    `docs/contact-delivery.md`.
-5. **SEO** — database-backed metadata, sitemap, structured data, once content models are stable.
-   See `docs/seo.md`.
+5. **SEO** — database-backed metadata, sitemap, structured data, and public media delivery
+   hardening (immutable/ETag caching). See `docs/seo.md`.
 
 Each doc states plainly whether its vertical is implemented, partially implemented, or design-only
 at the time it was last updated — check the "Status" line at the top of each doc rather than

@@ -168,6 +168,16 @@ databaseSuite('Portrait and CV management', () => {
       expect(cleared.body.data).toBeNull();
     });
 
+    it('exposes the public profile subset for SEO metadata, without email', async () => {
+      const res = await request(server()).get('/api/v1/profile').expect(200);
+      expect(res.body.data).toMatchObject({
+        name: expect.any(String),
+        headline: expect.any(String),
+        bio: expect.any(String),
+      });
+      expect(res.body.data.email).toBeUndefined();
+    });
+
     it('blocks deleting the media asset while it is the active portrait', async () => {
       const mediaId = await uploadApprovedImage();
       await request(server())

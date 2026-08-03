@@ -10,6 +10,12 @@ vi.mock('@/lib/public-content.server', () => ({
   getPublishedPosts: () => Promise.resolve([]),
   getActivePortrait: () => Promise.resolve(null),
   getCvAvailable: () => Promise.resolve(false),
+  getPublicProfile: () => Promise.resolve(null),
+}));
+vi.mock('@/lib/seo', () => ({
+  JsonLd: () => null,
+  personJsonLd: () => ({}),
+  websiteJsonLd: () => ({}),
 }));
 import Home from './page';
 describe('homepage semantics', () => {

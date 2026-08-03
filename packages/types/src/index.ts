@@ -94,6 +94,7 @@ export interface PostRecord {
   status: PublicationStatus;
   publishedAt?: string | null;
   readingTime: number;
+  author: string;
   tags: string[];
   seoTitle: string;
   seoDescription: string;

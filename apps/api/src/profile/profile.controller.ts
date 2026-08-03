@@ -9,6 +9,9 @@ import { ProfileService } from './profile.service';
 @Controller('profile')
 export class ProfileController {
   constructor(private readonly profile: ProfileService) {}
+  @Get() async get() {
+    return { data: await this.profile.getPublic() };
+  }
   @Get('portrait') async portrait() {
     return { data: await this.profile.getPublicPortrait() };
   }

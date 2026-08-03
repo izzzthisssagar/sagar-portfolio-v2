@@ -25,6 +25,15 @@ export class ProfileService {
     return profile;
   }
 
+  /** Public, unauthenticated subset for SEO metadata and structured data (see docs/seo.md) — name,
+   * headline, and bio only. Excludes `email`: the site already has a dedicated contact form, and
+   * publishing the raw address in page metadata/JSON-LD only invites scraping. */
+  async getPublic() {
+    const profile = await this.prisma.profile.findFirst();
+    if (!profile) return null;
+    return { name: profile.name, headline: profile.headline, bio: profile.bio };
+  }
+
   async getPublicPortrait() {
     const profile = await this.prisma.profile.findFirst({ include: { portraitMedia: true } });
     const portrait = profile?.portraitMedia;

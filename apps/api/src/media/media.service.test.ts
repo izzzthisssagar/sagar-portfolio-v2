@@ -244,4 +244,23 @@ describe('MediaService', () => {
     prisma.mediaAsset.findUnique.mockResolvedValueOnce(null);
     await expect(service.get('missing')).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('serves an approved asset publicly with its sha256 for cache validation', async () => {
+    const { service, prisma, storage } = setup();
+    prisma.mediaAsset.findUnique.mockResolvedValueOnce({ ...baseMedia, status: 'APPROVED' });
+    await storage.put('quarantine/abc.png', Buffer.from('bytes'), 'image/png');
+    const result = await service.getApprovedFile('m1');
+    expect(result).toEqual({
+      buffer: Buffer.from('bytes'),
+      mimeType: 'image/png',
+      filename: 'photo.png',
+      sha256: 'abc',
+    });
+  });
+
+  it('returns null for a public file request against a non-approved asset, without distinguishing why', async () => {
+    const { service, prisma } = setup();
+    prisma.mediaAsset.findUnique.mockResolvedValueOnce({ ...baseMedia, status: 'QUARANTINED' });
+    expect(await service.getApprovedFile('m1')).toBeNull();
+  });
 });

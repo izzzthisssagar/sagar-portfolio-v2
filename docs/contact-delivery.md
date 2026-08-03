@@ -1,9 +1,8 @@
 # Contact message lifecycle and notification delivery
 
-Status: **design-only** as of this doc's last update — not yet implemented. `ContactMessage`
-exists in the schema (Sprint 1) and the dashboard already counts `NEW` rows, but no controller,
-service, delivery adapter, or admin inbox exists yet. Update the status line once the vertical
-lands.
+Status: **implemented** — persistence, honeypot/throttle protection, the capture (dev/test) and
+SMTP (production, fail-closed) notification adapters, delivery-attempt tracking, the admin inbox,
+and the public contact form are all live.
 
 ## Message lifecycle
 

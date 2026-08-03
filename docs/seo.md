@@ -1,8 +1,8 @@
 # SEO and structured data
 
-Status: **design-only** as of this doc's last update — not yet implemented for Sprint 3's expanded
-scope (homepage/About/Work/Notes/Contact metadata, sitemap, JSON-LD). Update once the vertical
-lands.
+Status: **implemented** — per-page metadata (title/description/canonical/Open Graph/Twitter cards),
+`Person`/`WebSite`/`CreativeWork`/`Article` JSON-LD, `sitemap.xml`, `robots.txt`, `/admin/*`
+`noindex,nofollow`, and the public media delivery hardening below are all live.
 
 ## Ownership
 
@@ -12,9 +12,9 @@ fails closed if `PUBLIC_SITE_URL` is unset (same fail-closed pattern as the medi
 
 | Page | Title/description source | Structured data |
 |---|---|---|
-| Homepage / About | `Profile` row | `Person`, `WebSite` |
+| Homepage / About | `Profile` row (public `GET /profile`, excludes `email`) | `Person`, `WebSite` |
 | Work index | static copy | — |
-| Project page | `Project.title/summary/seoTitle?` fields once added, else derived from `title`/`summary` | `CreativeWork` (or `SoftwareApplication` only where factually applicable — never asserted without a factual basis in the stored project record) |
+| Project page | derived from `Project.title`/`summary` (no `seoTitle` field was added — nothing in the stored record needed one beyond the title itself) | `CreativeWork` |
 | Notes index | static copy | — |
 | Field Note page | `BlogPost.seoTitle`, `seoDescription`, `canonicalUrl` | `Article` |
 | Contact | static copy | — |
@@ -27,9 +27,21 @@ mode) and every `/admin/*` CMS page render `noindex, nofollow` via `robots` meta
 
 ## Sitemap and robots
 
-`GET /sitemap.xml` — generated from the database at request time (not statically at build time),
-so newly published content appears without a redeploy. `GET /robots.txt` — disallows `/admin`,
-references `PUBLIC_SITE_URL/sitemap.xml`.
+`GET /sitemap.xml` (`apps/web/app/sitemap.ts`) and `GET /robots.txt` (`apps/web/app/robots.ts`) are
+Next.js route handlers, not static files — the sitemap queries published projects and posts through
+the same `revalidate: 60` fetch used by every other public page, so newly published content appears
+within a minute without a redeploy, never at build time. `robots.txt` disallows `/admin` and points
+at `PUBLIC_SITE_URL/sitemap.xml`.
+
+## Public media delivery hardening (Phase 18)
+
+`GET /media/:id/file` (`PublicMediaController`) is cached as immutable:
+`Cache-Control: public, max-age=31536000, immutable`, with an `ETag` set to the asset's own SHA-256.
+This is safe because storage keys are content-addressed (see `docs/media-pipeline.md`) — a given
+media `id` always resolves to the same bytes for its lifetime, so there is nothing to revalidate.
+A conditional request (`If-None-Match` matching the current ETag) short-circuits to `304` without
+re-streaming the file. Still 404s for anything not `APPROVED`, without distinguishing why, exactly
+as before.
 
 ## Configuration
 

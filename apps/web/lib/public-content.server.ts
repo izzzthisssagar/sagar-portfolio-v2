@@ -83,6 +83,7 @@ function toPostRecord(article: (typeof fallbackNotes)[number]): PostRecord {
     status: article.status,
     publishedAt: article.publishedDate ?? null,
     readingTime: article.readingTime,
+    author: article.author,
     tags: article.tags,
     seoTitle: article.seoTitle,
     seoDescription: article.seoDescription,
@@ -136,6 +137,23 @@ export async function getPublishedProjectBySlug(slug: string): Promise<ProjectDe
     return null;
   }
   throw new PublicContentUnavailableError(`the project API request for "${slug}" failed`);
+}
+
+export interface PublicProfile {
+  name: string;
+  headline: string;
+  bio: string;
+}
+
+/**
+ * Sources the Person/WebSite structured data and homepage/About metadata (see docs/seo.md).
+ * Soft-fails to `null` rather than throwing — a missing Profile row means the content seed
+ * hasn't run yet, which the page components already treat as "nothing to render" for the
+ * static hero copy; JSON-LD/metadata generation should degrade the same way, not 500 the page.
+ */
+export async function getPublicProfile(): Promise<PublicProfile | null> {
+  const result = await publicFetch<PublicProfile | null>('/profile');
+  return result.status === 'ok' ? result.data : null;
 }
 
 export interface ActivePortrait {

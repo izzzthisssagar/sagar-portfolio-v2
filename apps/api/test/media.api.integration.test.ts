@@ -125,6 +125,31 @@ databaseSuite('Media pipeline: upload, validation, quarantine, approval', () => 
     expect(approved.body.data.storageKey).toMatch(/^approved\//);
   });
 
+  it('serves an approved asset publicly with immutable, ETag-validated caching', async () => {
+    const buffer = await pngBuffer('#00ffff');
+    const uploaded = await request(server())
+      .post('/api/v1/admin/media')
+      .set(auth())
+      .attach('file', buffer, { filename: 'public.png', contentType: 'image/png' })
+      .expect(201);
+    const id = uploaded.body.data.id as string;
+    await request(server())
+      .post(`/api/v1/admin/media/${id}/approve`)
+      .set(auth())
+      .send({ altText: 'A blue square used as public delivery evidence.' })
+      .expect(201);
+
+    const first = await request(server()).get(`/api/v1/media/${id}/file`).expect(200);
+    expect(first.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    const etag = first.headers.etag as string;
+    expect(etag).toBeTruthy();
+
+    await request(server())
+      .get(`/api/v1/media/${id}/file`)
+      .set('If-None-Match', etag)
+      .expect(304);
+  });
+
   it('short-circuits a duplicate upload by checksum instead of creating a second row', async () => {
     const buffer = await pngBuffer('#00ff00');
     const first = await request(server())

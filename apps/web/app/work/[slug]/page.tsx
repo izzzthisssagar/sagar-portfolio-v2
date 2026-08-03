@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPublishedProjectBySlug, getPublishedProjects } from '@/lib/public-content.server';
+import { creativeWorkJsonLd, JsonLd } from '@/lib/seo';
 
 export async function generateStaticParams() {
   const projects = await getPublishedProjects();
@@ -17,7 +18,7 @@ export async function generateMetadata({
   if (!project) return {};
   const canonical = `/work/${slug}`;
   return {
-    title: `${project.title} — Sagar Thapa`,
+    title: project.title,
     description: project.summary,
     alternates: { canonical },
     openGraph: {
@@ -25,6 +26,11 @@ export async function generateMetadata({
       description: project.summary,
       url: canonical,
       type: 'article',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: project.title,
+      description: project.summary,
     },
   };
 }
@@ -50,6 +56,7 @@ export default async function CaseStudy({ params }: { params: Promise<{ slug: st
 
   return (
     <main id="main" className="page-shell">
+      <JsonLd data={creativeWorkJsonLd(project)} />
       <article className="container">
         <p className="eyebrow">Project / {project.status}</p>
         <h1 className="display">{project.title}</h1>

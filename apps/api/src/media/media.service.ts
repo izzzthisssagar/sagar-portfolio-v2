@@ -80,11 +80,11 @@ export class MediaService {
    * "exists but not public" to the caller. */
   async getApprovedFile(
     id: string,
-  ): Promise<{ buffer: Buffer; mimeType: string; filename: string } | null> {
+  ): Promise<{ buffer: Buffer; mimeType: string; filename: string; sha256: string } | null> {
     const media = await this.prisma.mediaAsset.findUnique({ where: { id } });
     if (!media || media.status !== MediaStatus.APPROVED) return null;
     const buffer = await this.storage.get(media.storageKey);
-    return { buffer, mimeType: media.mimeType, filename: media.filename };
+    return { buffer, mimeType: media.mimeType, filename: media.filename, sha256: media.sha256 };
   }
 
   async upload(file: { buffer: Buffer; originalname: string; mimetype: string }, actorId?: string) {

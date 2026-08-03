@@ -1,5 +1,12 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getPublishedPosts } from '@/lib/public-content.server';
+
+export const metadata: Metadata = {
+  title: 'Field Notes',
+  description: 'Writing on testing practice, tooling, and what breaks in production.',
+  alternates: { canonical: '/notes' },
+};
 
 export default async function NotesPage() {
   const notes = await getPublishedPosts();
