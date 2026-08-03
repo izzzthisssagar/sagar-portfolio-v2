@@ -16,6 +16,14 @@ const sharedEnv = {
   DATABASE_URL: databaseUrl,
   WEB_URL: 'http://127.0.0.1:3000',
   API_URL: 'http://127.0.0.1:4000',
+  // The production default (60 req/60s/IP, apps/api/src/app.module.ts) is a real security
+  // control and is never touched here — this only raises the budget for the one API instance
+  // this whole sequential 25-spec suite shares, which can exceed 60 of its own necessary
+  // request volume within a single 60s window on its own (see docs/sprint-3.md "Known
+  // limitations"). Only takes effect if this config actually spawns the API server (below);
+  // when CI pre-starts it via a separate step (see .github/workflows/ci.yml), that step's own
+  // env is what matters — this value is kept in sync with it.
+  RATE_LIMIT_MAX: process.env.RATE_LIMIT_MAX ?? '300',
 };
 
 // The API server (and the DB-backed specs in tests/e2e/cms.spec.ts) only

@@ -93,6 +93,12 @@ jobs:
         run: pnpm --filter @portfolio/api exec nest start &
         env:
           API_URL: http://127.0.0.1:4000
+          # Raises only this CI instance's app-wide rate-limit budget (production default,
+          # apps/api/src/app.module.ts, stays 60 req/60s/IP) — the sequential 25-spec Playwright
+          # suite that reuses this same server can exceed 60 of its own necessary request volume
+          # within a single 60s window on its own; see docs/sprint-3.md "Known limitations" and
+          # playwright.config.ts.
+          RATE_LIMIT_MAX: '300'
       - name: Wait for the API to become healthy
         run: |
           for i in $(seq 1 30); do
