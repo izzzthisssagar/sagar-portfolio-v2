@@ -4,6 +4,7 @@ import { jwtVerify, type JWTPayload } from 'jose';
 export interface AdminAccessClaims extends JWTPayload {
   sub: string;
   role: 'admin';
+  tokenVersion: number;
 }
 
 function verificationConfig() {
@@ -29,7 +30,8 @@ export async function verifyAdminAccessToken(token: string | undefined) {
       typeof payload.exp !== 'number' ||
       typeof payload.sub !== 'string' ||
       payload.sub.length === 0 ||
-      payload.role !== 'admin'
+      payload.role !== 'admin' ||
+      typeof payload.tokenVersion !== 'number'
     )
       return null;
     return payload as AdminAccessClaims;

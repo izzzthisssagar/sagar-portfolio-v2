@@ -1,21 +1,11 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import helmet from 'helmet';
-import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
-import { ErrorEnvelopeFilter } from './shared';
+import { configureApp } from './configure-app';
 export async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  app.use(helmet());
-  app.use(cookieParser());
-  app.enableCors({ origin: process.env.WEB_URL ?? 'http://localhost:3000', credentials: true });
-  app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
-  );
-  app.useGlobalFilters(new ErrorEnvelopeFilter());
+  configureApp(app);
   const config = new DocumentBuilder()
     .setTitle('Sagar Portfolio API')
     .setVersion('1')

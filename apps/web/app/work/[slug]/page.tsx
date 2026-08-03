@@ -1,66 +1,105 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { caseStudySections, projects } from '@/lib/content';
-export function generateStaticParams() {
+import { getPublishedProjectBySlug, getPublishedProjects } from '@/lib/public-content.server';
+
+export async function generateStaticParams() {
+  const projects = await getPublishedProjects();
   return projects.map(({ slug }) => ({ slug }));
 }
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const project = await getPublishedProjectBySlug(slug);
+  if (!project) return {};
+  const canonical = `/work/${slug}`;
+  return {
+    title: `${project.title} — Sagar Thapa`,
+    description: project.summary,
+    alternates: { canonical },
+    openGraph: {
+      title: project.title,
+      description: project.summary,
+      url: canonical,
+      type: 'article',
+    },
+  };
+}
+
+const SECTIONS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'context', label: 'Context' },
+  { key: 'responsibilities', label: 'Responsibilities' },
+  { key: 'systemMap', label: 'System map' },
+  { key: 'testStrategy', label: 'Test strategy' },
+  { key: 'fixAndRetest', label: 'Fix and retest' },
+  { key: 'outcome', label: 'Outcome' },
+  { key: 'lessons', label: 'Lessons and future improvements' },
+] as const;
+
 export default async function CaseStudy({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const project = projects.find((p) => p.slug === slug);
+  const project = await getPublishedProjectBySlug(slug);
   if (!project) notFound();
+
   return (
     <main id="main" className="page-shell">
       <article className="container">
-        <p className="eyebrow">
-          Project {project.id} / {project.status}
-        </p>
+        <p className="eyebrow">Project / {project.status}</p>
         <h1 className="display">{project.title}</h1>
         <p className="lede">{project.summary}</p>
-        {project.slug === 'numazu-halal-food' && (
-          <section>
-            <h2>Expected / Actual / Fixed</h2>
-            <p>
-              MRP − discount + shipping + VAT = total. Known issue: the product discount was applied
-              twice. Published evidence remains pending.
-            </p>
-          </section>
+
+        {project.metrics.length > 0 && (
+          <div className="metrics">
+            {project.metrics.map((metric) => (
+              <div className="metric" key={metric.label}>
+                <strong>{metric.value}</strong>
+                <span>{metric.label}</span>
+              </div>
+            ))}
+          </div>
         )}
-        {project.slug === 'api-security-testing' && (
-          <section>
-            <h2>Authorization gateway</h2>
-            <p>
-              Valid → unauthenticated → unauthorized cross-user → ownership failure → corrected
-              ownership enforcement.
-            </p>
-          </section>
+
+        {(project.liveUrl || project.githubUrl) && (
+          <div className="actions">
+            {project.liveUrl && (
+              <a className="button primary" href={project.liveUrl}>
+                VIEW LIVE
+              </a>
+            )}
+            {project.githubUrl && (
+              <a className="button" href={project.githubUrl}>
+                GITHUB
+              </a>
+            )}
+          </div>
         )}
-        {project.slug === 'performance-testing' && (
-          <section>
-            <h2>Latency distribution</h2>
-            <p>
-              P50 / P95 / P99 / long-tail latency / bottleneck indication. Results are not populated
-              until measured evidence is supplied.
-            </p>
-          </section>
-        )}
-        {project.slug === 'automation-testing' && (
-          <section>
-            <h2>Automation trace</h2>
-            <p>
-              Open → Locate → Act → Assert → Report. Failure evidence branches to screenshot,
-              console, stack trace, and defect record.
-            </p>
-          </section>
-        )}
-        {caseStudySections.map((section) => (
-          <section className="section" key={section}>
-            <h2>{section}</h2>
-            <p>
-              {project.status === 'draft'
-                ? 'Draft structure — factual evidence and approved media are pending.'
-                : 'Case-study content is under active development.'}
-            </p>
+
+        {project.labels && project.labels.length > 0 && <p>{project.labels.join(' / ')}</p>}
+
+        {SECTIONS.filter(({ key }) => project[key]).map(({ key, label }) => (
+          <section className="section" key={key}>
+            <h2>{label}</h2>
+            <p>{project[key]}</p>
           </section>
         ))}
+
+        {project.findings.length > 0 && (
+          <section className="section">
+            <h2>Findings</h2>
+            <ul>
+              {project.findings.map((finding) => (
+                <li key={finding.title}>
+                  <strong>{finding.title}</strong> ({finding.severity ?? 'unrated'}, evidence:{' '}
+                  {finding.evidenceStatus}) — {finding.summary}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </article>
     </main>
   );

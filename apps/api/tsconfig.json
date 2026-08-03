@@ -11,5 +11,5 @@
     "noEmit": false,
     "strictPropertyInitialization": false
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts"]
 }

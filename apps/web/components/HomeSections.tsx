@@ -1,5 +1,6 @@
+import type { ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
 import Link from 'next/link';
-import { notes, projects } from '@/lib/content';
+import { notes } from '@/lib/content';
 import { SystemCanvas } from './SystemCanvas';
 export function Hero() {
   return (
@@ -72,8 +73,8 @@ export function EvidenceSection() {
     </section>
   );
 }
-export function QAMasterySection() {
-  const p = projects[0]!;
+export function QAMasterySection({ project }: { project: ProjectDetailRecord | null }) {
+  if (!project) return null;
   return (
     <section className="section" aria-labelledby="mastery-title">
       <div className="container">
@@ -81,33 +82,28 @@ export function QAMasterySection() {
           <p className="eyebrow">02 / Flagship</p>
           <h2 id="mastery-title">QA Mastery becomes a system.</h2>
         </div>
-        <p className="lede">
-          QA Mastery is an independently conceived and directed product by Sagar Thapa. I am the
-          sole human creator and product owner, responsible for the product vision, requirements,
-          architecture decisions, testing direction, iterative evaluation, and release decisions. I
-          used substantial AI coding assistance during research, implementation, debugging,
-          documentation, and refinement. The platform remains under active development.
-        </p>
+        <p className="lede">{project.overview ?? project.summary}</p>
         <div className="metrics">
-          {p.metrics.map((m) => (
+          {project.metrics.map((m) => (
             <div className="metric" key={m.label}>
               <strong>{m.value}</strong>
               <span>{m.label}</span>
             </div>
           ))}
         </div>
-        <p>
-          Platform / Curriculum / Interactive Widgets / Automated Grading / BuggyShop / BuggyAPI /
-          AI Tutor / Supabase / CI & Release Gate
-        </p>
+        {project.labels && project.labels.length > 0 && <p>{project.labels.join(' / ')}</p>}
         <div className="actions">
-          <a className="button primary" href="https://qa-mastery-platform.vercel.app/">
-            VIEW LIVE
-          </a>
-          <a className="button" href="https://github.com/izzzthisssagar/qa-mastery">
-            GITHUB
-          </a>
-          <Link className="button" href="/work/qa-mastery">
+          {project.liveUrl && (
+            <a className="button primary" href={project.liveUrl}>
+              VIEW LIVE
+            </a>
+          )}
+          {project.githubUrl && (
+            <a className="button" href={project.githubUrl}>
+              GITHUB
+            </a>
+          )}
+          <Link className="button" href={`/work/${project.slug}`}>
             CASE STUDY
           </Link>
         </div>
@@ -115,7 +111,7 @@ export function QAMasterySection() {
     </section>
   );
 }
-export function ProjectIndex() {
+export function ProjectIndex({ projects }: { projects: ProjectRecord[] }) {
   return (
     <section className="section" aria-labelledby="projects-title">
       <div className="container">
@@ -123,18 +119,22 @@ export function ProjectIndex() {
           <p className="eyebrow">03 / Work</p>
           <h2 id="projects-title">Every project opens a different layer.</h2>
         </div>
-        <ol className="project-list">
-          {projects.map((p) => (
-            <li className="project-row" key={p.id}>
-              <Link href={`/work/${p.slug}`}>
-                <span>{p.id}</span>
-                <strong>{p.title}</strong>
-                <span>{p.summary}</span>
-                <span aria-hidden>↗</span>
-              </Link>
-            </li>
-          ))}
-        </ol>
+        {projects.length === 0 ? (
+          <p>Published projects are on the way.</p>
+        ) : (
+          <ol className="project-list">
+            {projects.map((p, index) => (
+              <li className="project-row" key={p.id}>
+                <Link href={`/work/${p.slug}`}>
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <strong>{p.title}</strong>
+                  <span>{p.summary}</span>
+                  <span aria-hidden>↗</span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
         <p>
           Project preview media is pending review. No screenshot is presented as evidence until
           supplied and approved.

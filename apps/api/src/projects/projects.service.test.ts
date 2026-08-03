@@ -65,6 +65,10 @@ describe('ProjectsService', () => {
     await expect(service.getPublicBySlug('draft')).rejects.toThrow('Project not found');
     expect(prisma.project.findFirst).toHaveBeenCalledWith({
       where: { slug: 'draft', status: 'PUBLISHED' },
+      include: {
+        metrics: { where: { evidence: 'CONFIRMED' }, orderBy: { order: 'asc' } },
+        findings: { orderBy: { order: 'asc' } },
+      },
     });
   });
   it('creates, changes slug without changing identity, and deletes with audit events', async () => {
@@ -74,10 +78,12 @@ describe('ProjectsService', () => {
         title: project.title,
         slug: project.slug,
         summary: project.summary,
-        status: 'draft',
         order: 1,
       },
       'admin',
+    );
+    expect(tx.project.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'DRAFT' }) }),
     );
     await service.update('p1', { slug: 'changed' }, 'admin');
     await service.remove('p1', 'admin');
@@ -106,7 +112,6 @@ describe('ProjectsService', () => {
         title: project.title,
         slug: project.slug,
         summary: project.summary,
-        status: 'draft',
         order: 1,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
