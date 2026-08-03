@@ -34,7 +34,9 @@ enum MediaCategory {
 enum ContactStatus {
   NEW
   READ
+  REPLIED
   ARCHIVED
+  SPAM
 }
 
 model AdminUser {
@@ -306,15 +308,33 @@ model GameAchievement {
 }
 
 model ContactMessage {
-  id        String        @id @default(cuid())
-  name      String
-  email     String
-  subject   String?
-  message   String
-  status    ContactStatus @default(NEW)
-  consentAt DateTime
-  createdAt DateTime      @default(now())
-  ipHash    String?
+  id               String                   @id @default(cuid())
+  name             String
+  email            String
+  subject          String?
+  company          String?
+  message          String
+  status           ContactStatus            @default(NEW)
+  consentAt        DateTime
+  createdAt        DateTime                 @default(now())
+  ipHash           String?
+  deliveryAttempts ContactDeliveryAttempt[]
+
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+}
+
+/// One row per notification-delivery attempt for a ContactMessage — never the message body or
+/// any personal data, only outcome. See docs/contact-delivery.md.
+model ContactDeliveryAttempt {
+  id               String         @id @default(cuid())
+  contactMessageId String
+  contactMessage   ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+  success          Boolean
+  reason           String?
+  createdAt        DateTime       @default(now())
+
+  @@index([contactMessageId])
 }
 
 model MediaAsset {

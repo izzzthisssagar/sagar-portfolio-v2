@@ -9,6 +9,7 @@ import { PostsModule } from './posts/posts.module';
 import { MediaModule } from './media/media.module';
 import { ProfileModule } from './profile/profile.module';
 import { CvModule } from './cv/cv.module';
+import { ContactModule } from './contact/contact.module';
 import { PrismaModule } from './prisma/prisma.module';
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PrismaModule } from './prisma/prisma.module';
     MediaModule,
     ProfileModule,
     CvModule,
+    ContactModule,
     DashboardModule,
   ],
   controllers: [HealthController],
