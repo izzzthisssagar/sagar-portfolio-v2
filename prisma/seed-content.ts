@@ -110,10 +110,101 @@ export async function seedProject(
   console.log(`Seeded ${input.slug} (${input.status}).`);
 }
 
+/**
+ * Migrates the four static Field Notes seed articles from
+ * `apps/web/lib/content.ts` into `BlogPost` rows, verbatim — same title,
+ * slug, excerpt, and body text the static array already held (all four are
+ * placeholder "draft seed" copy, since no real article content exists yet;
+ * this is not invented content, it's the same placeholder text moved to the
+ * database). Every static article had `status: 'draft'`, so every migrated
+ * row starts `DRAFT` too — nothing here becomes publicly visible until an
+ * administrator reviews and publishes it through the CMS.
+ *
+ * `category` (free string in the static shape) has no equivalent BlogPost
+ * field — the schema uses a relational `BlogCategory` instead — so a single
+ * "Field Notes" category is upserted and every migrated post is attached to
+ * it. `tags` (`['draft']` in the static shape) maps onto relational
+ * `BlogTag` rows the same way. `readingTime`/`relatedProjects`/
+ * `relatedArticles` have no meaningful source data (all identical/empty
+ * across every article) and are left at their schema defaults rather than
+ * carrying over placeholder numbers as if they were measured.
+ */
+const fieldNotesArticles = [
+  {
+    title: 'Testing an OTP flow beyond the happy path',
+    slug: 'testing-otp-beyond-happy-path',
+  },
+  {
+    title: 'Why a correct-looking checkout total can be wrong',
+    slug: 'checkout-total-can-be-wrong',
+  },
+  {
+    title: 'Reading P95 and P99 without guessing',
+    slug: 'reading-p95-p99',
+  },
+  {
+    title: 'Building QA Mastery through repeated iteration',
+    slug: 'building-qa-mastery',
+  },
+].map((article, index) => ({
+  ...article,
+  excerpt: 'Draft seed — article content is not yet published.',
+  body: 'Draft seed content. This is a content-model placeholder, not a finished article.',
+  seoTitle: article.title,
+  seoDescription: 'Draft seed article.',
+  displayOrder: index,
+}));
+
+export async function seedPosts(prisma: PrismaService) {
+  await prisma.$transaction(async (tx) => {
+    const category = await tx.blogCategory.upsert({
+      where: { slug: 'field-notes' },
+      update: {},
+      create: { slug: 'field-notes', name: 'Field Notes' },
+    });
+    const draftTag = await tx.blogTag.upsert({
+      where: { slug: 'draft' },
+      update: {},
+      create: { slug: 'draft', name: 'draft' },
+    });
+    for (const article of fieldNotesArticles) {
+      await tx.blogPost.upsert({
+        where: { slug: article.slug },
+        update: {
+          title: article.title,
+          excerpt: article.excerpt,
+          body: article.body,
+          seoTitle: article.seoTitle,
+          seoDescription: article.seoDescription,
+          displayOrder: article.displayOrder,
+          categoryId: category.id,
+          tags: { set: [{ id: draftTag.id }] },
+        },
+        create: {
+          title: article.title,
+          slug: article.slug,
+          excerpt: article.excerpt,
+          body: article.body,
+          readingTime: 1,
+          author: 'Sagar Thapa',
+          status: 'DRAFT',
+          seoTitle: article.seoTitle,
+          seoDescription: article.seoDescription,
+          displayOrder: article.displayOrder,
+          categoryId: category.id,
+          tags: { connect: [{ id: draftTag.id }] },
+        },
+      });
+    }
+  });
+  console.log(`Seeded ${fieldNotesArticles.length} Field Notes article(s) (draft).`);
+}
+
 /** Reused directly by the Playwright global setup, and by the `db:seed`
  * CLI entrypoint (`prisma/seed.ts`) — both need the exact same idempotent
  * seed. */
 export async function seedContent(prisma: PrismaService) {
   await seedProject(prisma, qaMastery);
   await seedProject(prisma, numazuHalalFood);
+  await seedPosts(prisma);
 }

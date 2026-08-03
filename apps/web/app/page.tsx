@@ -9,12 +9,17 @@ import {
   QAMasterySection,
   QARiftTeaser,
 } from '@/components/HomeSections';
-import { getPublishedProjectBySlug, getPublishedProjects } from '@/lib/public-content.server';
+import {
+  getPublishedPosts,
+  getPublishedProjectBySlug,
+  getPublishedProjects,
+} from '@/lib/public-content.server';
 
 export default async function Home() {
-  const [projects, qaMastery] = await Promise.all([
+  const [projects, qaMastery, notes] = await Promise.all([
     getPublishedProjects(),
     getPublishedProjectBySlug('qa-mastery'),
+    getPublishedPosts(),
   ]);
   return (
     <main id="main">
@@ -23,7 +28,7 @@ export default async function Home() {
       <QAMasterySection project={qaMastery} />
       <ProjectIndex projects={projects} />
       <MethodSection />
-      <FieldNotesSection />
+      <FieldNotesSection notes={notes} />
       <AboutSection />
       <QARiftTeaser />
       <ContactFooter />

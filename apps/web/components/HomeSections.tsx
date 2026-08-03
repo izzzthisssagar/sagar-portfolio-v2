@@ -1,6 +1,5 @@
-import type { ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
+import type { PostRecord, ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
 import Link from 'next/link';
-import { notes } from '@/lib/content';
 import { SystemCanvas } from './SystemCanvas';
 export function Hero() {
   return (
@@ -172,7 +171,7 @@ export function MethodSection() {
     </section>
   );
 }
-export function FieldNotesSection() {
+export function FieldNotesSection({ notes }: { notes: PostRecord[] }) {
   return (
     <section className="section" aria-labelledby="notes-title">
       <div className="container">
@@ -181,9 +180,10 @@ export function FieldNotesSection() {
           <h2 id="notes-title">Evidence, written down.</h2>
         </div>
         <div className="notes">
+          {notes.length === 0 && <p>No Field Notes published yet.</p>}
           {notes.map((n) => (
             <article className="note" key={n.slug}>
-              <p className="eyebrow">Draft seed / {n.readingTime} min</p>
+              <p className="eyebrow">{n.readingTime} min</p>
               <h3>
                 <Link href={`/notes/${n.slug}`}>{n.title}</Link>
               </h3>

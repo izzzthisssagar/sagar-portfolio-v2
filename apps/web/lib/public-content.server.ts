@@ -1,6 +1,6 @@
 import 'server-only';
-import type { ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
-import { projects as fallbackProjects } from './content';
+import type { PostRecord, ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
+import { notes as fallbackNotes, projects as fallbackProjects } from './content';
 
 const API_URL = process.env.API_URL
   ? `${process.env.API_URL}/api/v1`
@@ -62,6 +62,55 @@ export async function getPublishedProjects(): Promise<ProjectRecord[]> {
     return fallbackProjects.filter((project) => project.status === 'published');
   }
   throw new PublicContentUnavailableError('the project list API request failed');
+}
+
+/** The legacy static seed (`lib/content.ts`) is `ArticleRecord`-shaped, not `PostRecord`-shaped —
+ * adapt it for the (currently always-empty, since none of the static articles are `published`)
+ * fallback path so the function signature stays honest about what it returns. */
+function toPostRecord(article: (typeof fallbackNotes)[number]): PostRecord {
+  return {
+    id: article.slug,
+    title: article.title,
+    slug: article.slug,
+    excerpt: article.excerpt,
+    body: article.body,
+    status: article.status,
+    publishedAt: article.publishedDate ?? null,
+    readingTime: article.readingTime,
+    tags: article.tags,
+    seoTitle: article.seoTitle,
+    seoDescription: article.seoDescription,
+  };
+}
+
+export async function getPublishedPosts(): Promise<PostRecord[]> {
+  const result = await publicFetch<PostRecord[]>('/posts?limit=100');
+  if (result.status === 'ok') return result.data;
+  if (result.status === 'not_found') return [];
+  if (staticFallbackAllowed()) {
+    console.warn('[public-content] API unavailable — using local development fallback content.');
+    return fallbackNotes.filter((note) => note.status === 'published').map(toPostRecord);
+  }
+  throw new PublicContentUnavailableError('the post list API request failed');
+}
+
+export async function getPublishedPostBySlug(slug: string): Promise<PostRecord | null> {
+  const result = await publicFetch<PostRecord>(`/posts/${slug}`);
+  if (result.status === 'ok') return result.data;
+  if (result.status === 'not_found') return null;
+  if (staticFallbackAllowed()) {
+    const fallback = fallbackNotes.find(
+      (note) => note.slug === slug && note.status === 'published',
+    );
+    if (fallback) {
+      console.warn(
+        `[public-content] API unavailable — using local development fallback for "${slug}".`,
+      );
+      return toPostRecord(fallback);
+    }
+    return null;
+  }
+  throw new PublicContentUnavailableError(`the post API request for "${slug}" failed`);
 }
 
 export async function getPublishedProjectBySlug(slug: string): Promise<ProjectDetailRecord | null> {

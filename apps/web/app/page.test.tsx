@@ -7,6 +7,7 @@ vi.mock('@/components/SystemCanvas', () => ({
 vi.mock('@/lib/public-content.server', () => ({
   getPublishedProjects: () => Promise.resolve([]),
   getPublishedProjectBySlug: () => Promise.resolve(null),
+  getPublishedPosts: () => Promise.resolve([]),
 }));
 import Home from './page';
 describe('homepage semantics', () => {

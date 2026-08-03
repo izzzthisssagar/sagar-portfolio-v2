@@ -1,18 +1,21 @@
 import Link from 'next/link';
-import { notes } from '@/lib/content';
-export default function NotesPage() {
+import { getPublishedPosts } from '@/lib/public-content.server';
+
+export default async function NotesPage() {
+  const notes = await getPublishedPosts();
   return (
     <main id="main" className="page-shell">
       <div className="container">
         <p className="eyebrow">Field Notes</p>
         <h1 className="display">Writing</h1>
-        {notes.map((n) => (
-          <article className="note" key={n.slug}>
-            <p>Draft seed</p>
+        {notes.length === 0 && <p>No Field Notes published yet.</p>}
+        {notes.map((note) => (
+          <article className="note" key={note.slug}>
+            <p className="eyebrow">{note.readingTime} min</p>
             <h2>
-              <Link href={`/notes/${n.slug}`}>{n.title}</Link>
+              <Link href={`/notes/${note.slug}`}>{note.title}</Link>
             </h2>
-            <p>{n.excerpt}</p>
+            <p>{note.excerpt}</p>
           </article>
         ))}
       </div>

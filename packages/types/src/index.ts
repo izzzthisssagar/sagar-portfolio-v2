@@ -72,6 +72,23 @@ export interface ArticleRecord {
   relatedArticles: string[];
 }
 
+/** Database-backed Field Notes article, distinct from the legacy static `ArticleRecord` seed
+ * shape above (which `apps/web/lib/content.ts` still holds as the fallback/seed source). */
+export interface PostRecord {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  body: string;
+  status: PublicationStatus;
+  publishedAt?: string | null;
+  readingTime: number;
+  tags: string[];
+  seoTitle: string;
+  seoDescription: string;
+  canonicalUrl?: string | null;
+}
+
 export interface ApiErrorEnvelope {
   error: { code: string; message: string; requestId: string; details?: unknown };
 }

@@ -80,4 +80,55 @@ describe('public-content.server — ALLOW_STATIC_CONTENT_FALLBACK boundary', () 
     const project = await getPublishedProjectBySlug('qa-mastery');
     expect(project).toEqual(record);
   });
+
+  it('posts: fails visibly (throws) instead of serving static fallback when the API is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
+    const { getPublishedPosts, getPublishedPostBySlug } = await import('./public-content.server');
+    await expect(getPublishedPosts()).rejects.toThrow(/refusing to silently substitute/i);
+    await expect(getPublishedPostBySlug('reading-p95-p99')).rejects.toThrow(
+      /refusing to silently substitute/i,
+    );
+  });
+
+  it('posts: treats a real 404 as "not found", never throws and never falls back', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
+    const { getPublishedPostBySlug } = await import('./public-content.server');
+    await expect(getPublishedPostBySlug('does-not-exist')).resolves.toBeNull();
+  });
+
+  it('posts: returns real database-backed content when the API responds', async () => {
+    const record = {
+      id: 'post1',
+      title: 'Reading P95 and P99 without guessing',
+      slug: 'reading-p95-p99',
+      excerpt: 'An excerpt.',
+      body: 'Body content.',
+      status: 'published',
+      publishedAt: '2026-01-01T00:00:00.000Z',
+      readingTime: 3,
+      tags: ['performance'],
+      seoTitle: 'Reading P95 and P99 without guessing',
+      seoDescription: 'An excerpt.',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: record }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    const { getPublishedPostBySlug } = await import('./public-content.server');
+    const post = await getPublishedPostBySlug('reading-p95-p99');
+    expect(post).toEqual(record);
+  });
+
+  it('posts: serves the labelled static fallback only once explicitly enabled', async () => {
+    process.env.ALLOW_STATIC_CONTENT_FALLBACK = 'true';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('down')));
+    const { getPublishedPosts } = await import('./public-content.server');
+    const posts = await getPublishedPosts();
+    expect(Array.isArray(posts)).toBe(true);
+  });
 });
