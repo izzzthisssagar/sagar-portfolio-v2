@@ -55,6 +55,12 @@ model RefreshSession {
   revokedAt    DateTime?
   replacedById String?
   userId       String
+  /// Snapshot of AdminUser.tokenVersion at the moment this session was
+  /// created (login) or this session's parent was rotated. Refresh compares
+  /// this against the admin's *current* tokenVersion — a mismatch means the
+  /// session predates a logout-all or reuse-detection event and is rejected
+  /// even if its own revokedAt sweep somehow raced and missed it.
+  tokenVersion Int       @default(0)
   user         AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime  @default(now())
 

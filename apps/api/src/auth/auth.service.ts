@@ -122,15 +122,25 @@ export class AuthService {
 
     const passwordOk = await this.verifyPassword(admin.passwordHash, password);
     if (!passwordOk) {
-      const next = nextLoginFailure(
-        { failedLoginCount: admin.failedLoginCount, lockedUntil: admin.lockedUntil },
-        now,
-      );
-      await this.prisma.adminUser.update({
+      // Atomic DB-side increment, not a read-then-write of `admin.failedLoginCount`
+      // (a value already stale by the time argon2.verify above returns) — under
+      // concurrent wrong-password attempts, computing the next count in
+      // application code from that stale read loses updates: five concurrent
+      // requests all reading the same starting count would each write back the
+      // same "+1" value instead of the counter actually reaching five. Postgres
+      // serializes concurrent `UPDATE ... SET x = x + 1` statements on the same
+      // row, so this always reflects every attempt exactly once.
+      const { failedLoginCount } = await this.prisma.adminUser.update({
         where: { id: admin.id },
-        data: { failedLoginCount: next.failedLoginCount, lockedUntil: next.lockedUntil },
+        data: { failedLoginCount: { increment: 1 } },
+        select: { failedLoginCount: true },
       });
-      await this.audit(next.lockedUntil ? 'LOGIN_LOCKED' : 'LOGIN_FAILURE', admin.id, ip);
+      let lockedUntil: Date | null = null;
+      if (failedLoginCount >= MAX_LOGIN_FAILURES) {
+        lockedUntil = new Date(now.getTime() + LOCKOUT_MS);
+        await this.prisma.adminUser.update({ where: { id: admin.id }, data: { lockedUntil } });
+      }
+      await this.audit(lockedUntil ? 'LOGIN_LOCKED' : 'LOGIN_FAILURE', admin.id, ip);
       throw new InvalidCredentialsException();
     }
 
@@ -143,6 +153,7 @@ export class AuthService {
       data: {
         tokenHash: hash,
         userId: admin.id,
+        tokenVersion: admin.tokenVersion,
         expiresAt: new Date(now.getTime() + REFRESH_TOKEN_SECONDS * 1000),
       },
     });
@@ -154,11 +165,30 @@ export class AuthService {
     };
   }
 
+  /** Revokes the whole session family and bumps tokenVersion in one
+   * transaction — both a genuine reuse (replay of an already-retired
+   * token) and a stale tokenVersion (the session predates a logout-all or
+   * an earlier reuse event) are treated identically: assume the family is
+   * compromised or simply superseded, kill every session, and invalidate
+   * any access token already issued under the old version. Bundling the
+   * revoke and the bump together is what makes "no concurrent refresh may
+   * restore a session after logout-all" hold — a concurrent refresh either
+   * sees this transaction's committed effects (revokedAt set, so its own
+   * claim fails) or commits first itself, in which case *its* descendant
+   * still carries the pre-bump tokenVersion and is therefore rejected by
+   * every later check (JwtAuthGuard for the access token, this same
+   * tokenVersion comparison for any attempt to refresh it again). */
   private async revokeFamilyAsReuse(userId: string, now: Date, ip?: string) {
-    await this.prisma.refreshSession.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: now },
-    });
+    await this.prisma.$transaction([
+      this.prisma.refreshSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: now },
+      }),
+      this.prisma.adminUser.update({
+        where: { id: userId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+    ]);
     await this.audit('REFRESH_REUSE_DETECTED', userId, ip);
   }
 
@@ -173,7 +203,11 @@ export class AuthService {
     if (!session) throw new SessionExpiredException();
     const now = new Date();
 
-    if (session.revokedAt) {
+    // Reused (already-retired) token, or a session whose tokenVersion no
+    // longer matches the admin's current one (logout-all or an earlier
+    // reuse event happened after this session was created/rotated) — both
+    // are handled the same way.
+    if (session.revokedAt || session.tokenVersion !== session.user.tokenVersion) {
       await this.revokeFamilyAsReuse(session.userId, now, ip);
       throw new SessionExpiredException('Session revoked.');
     }
@@ -189,6 +223,8 @@ export class AuthService {
     // WHERE clause against the just-committed row once the lock is
     // released — so at most one of any number of concurrent callers can
     // ever match and claim the session; every other caller sees `count: 0`.
+    // The same lock is what serializes this against a concurrent
+    // logout-all's session-revoke update — whichever commits first wins.
     const rotated = await this.prisma.$transaction(async (tx) => {
       const claim = await tx.refreshSession.updateMany({
         where: { id: session.id, revokedAt: null },
@@ -199,6 +235,7 @@ export class AuthService {
         data: {
           tokenHash: newHash,
           userId: session.userId,
+          tokenVersion: session.tokenVersion,
           expiresAt: new Date(now.getTime() + REFRESH_TOKEN_SECONDS * 1000),
         },
       });
@@ -223,7 +260,7 @@ export class AuthService {
 
     await this.audit('TOKEN_REFRESHED', session.userId, ip);
     return {
-      accessToken: this.signAccessToken(session.userId, session.user.tokenVersion),
+      accessToken: this.signAccessToken(session.userId, session.tokenVersion),
       refreshToken,
       admin: { id: session.user.id, email: session.user.email },
     };
@@ -241,19 +278,27 @@ export class AuthService {
   }
 
   async logoutAll(adminId: string, ip?: string) {
-    await this.prisma.refreshSession.updateMany({
-      where: { userId: adminId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    // Bumping tokenVersion invalidates every access token already issued to
-    // this admin immediately — JwtAuthGuard rejects any token signed with an
-    // older version — not just future refreshes. Without this, a
-    // still-valid 15-minute access token would keep working after
-    // logout-all until it naturally expired.
-    await this.prisma.adminUser.update({
-      where: { id: adminId },
-      data: { tokenVersion: { increment: 1 } },
-    });
+    // Both writes must land in one transaction: bumping tokenVersion
+    // invalidates every access token already issued to this admin
+    // immediately (JwtAuthGuard rejects any token signed with an older
+    // version), and revoking every active refresh session closes the
+    // family. If these were two separate writes, a refresh racing between
+    // them could read the session as still-active under the old
+    // tokenVersion and rotate it — a session "restored" after logout-all.
+    // With the writes atomic, a concurrent refresh either sees both
+    // committed (its claim on the now-revoked row fails) or commits first
+    // itself, in which case its descendant still carries the pre-bump
+    // tokenVersion and is rejected by every later check.
+    await this.prisma.$transaction([
+      this.prisma.refreshSession.updateMany({
+        where: { userId: adminId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      this.prisma.adminUser.update({
+        where: { id: adminId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+    ]);
     await this.audit('LOGOUT_ALL', adminId, ip);
   }
 

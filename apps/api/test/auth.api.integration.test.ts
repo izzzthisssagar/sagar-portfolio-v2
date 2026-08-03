@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ThrottlerStorage, type ThrottlerStorageService } from '@nestjs/throttler';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -19,6 +20,7 @@ function cookieValue(setCookieHeader: string[] | undefined, name: string): strin
 databaseSuite('Authentication vertical', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let throttlerStorage: ThrottlerStorageService;
   const email = 'auth-contract-admin@example.invalid';
   const password = 'Correct-Horse-Battery-9!';
 
@@ -28,9 +30,16 @@ databaseSuite('Authentication vertical', () => {
     configureApp(app);
     await app.init();
     prisma = module.get(PrismaService);
+    throttlerStorage = module.get<ThrottlerStorageService>(ThrottlerStorage);
   });
 
   beforeEach(async () => {
+    // The whole file shares one app instance (and therefore one in-memory
+    // throttler), and this suite deliberately exercises the login route's
+    // rate limit itself (concurrent-lockout, repeated-failure tests) — so
+    // each test needs its own untouched 20-per-minute budget rather than
+    // inheriting whatever earlier tests already spent.
+    throttlerStorage.storage.clear();
     await prisma.auditLog.deleteMany({});
     await prisma.refreshSession.deleteMany({});
     await prisma.adminUser.deleteMany({});
@@ -200,6 +209,181 @@ databaseSuite('Authentication vertical', () => {
     );
     expect(actions.filter((a) => a === 'TOKEN_REFRESHED')).toHaveLength(1);
     expect(actions.filter((a) => a === 'REFRESH_REUSE_DETECTED')).toHaveLength(1);
+  });
+
+  it('invalidates the access token issued to the legitimate rotation once a reuse of its retired predecessor is detected', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const loginCookies = login.headers['set-cookie'] as unknown as string[];
+    const csrfToken = cookieValue(loginCookies, 'portfolio_csrf')!;
+    const firstRefreshToken = cookieValue(loginCookies, 'portfolio_refresh')!;
+
+    const rotated = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', [`portfolio_refresh=${firstRefreshToken}`, `portfolio_csrf=${csrfToken}`])
+      .expect(200);
+    const rotatedAccessToken = cookieValue(
+      rotated.headers['set-cookie'] as unknown as string[],
+      'portfolio_access',
+    )!;
+
+    // The winning access token works right up until the retired token is
+    // replayed.
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${rotatedAccessToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', [`portfolio_refresh=${firstRefreshToken}`, `portfolio_csrf=${csrfToken}`])
+      .expect(401);
+
+    // Reuse detection bumped tokenVersion along with revoking the family —
+    // the token from the legitimate rotation is now dead too, not just the
+    // replayed one.
+    const rejected = await request(app.getHttpServer())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${rotatedAccessToken}`)
+      .expect(401);
+    expect(rejected.body.error.message).toMatch(/administrator session required/i);
+  });
+
+  it('lets a refresh racing logout-all leave no usable session behind', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const loginCookies = login.headers['set-cookie'] as unknown as string[];
+    const csrfToken = cookieValue(loginCookies, 'portfolio_csrf')!;
+    const refreshToken = cookieValue(loginCookies, 'portfolio_refresh')!;
+    const accessToken = cookieValue(loginCookies, 'portfolio_access')!;
+    const admin = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+
+    const [refreshResult] = await Promise.all([
+      request(app.getHttpServer())
+        .post('/api/v1/auth/refresh')
+        .set('Origin', WEB_URL)
+        .set('X-CSRF-Token', csrfToken)
+        .set('Cookie', [`portfolio_refresh=${refreshToken}`, `portfolio_csrf=${csrfToken}`]),
+      request(app.getHttpServer())
+        .post('/api/v1/auth/logout-all')
+        .set('Authorization', `Bearer ${accessToken}`),
+    ]);
+
+    // Whether the refresh won or lost the race, its resulting access token
+    // (if any) must not authenticate afterward — logout-all's tokenVersion
+    // bump applies regardless of which side of the race won.
+    if (refreshResult.status === 200) {
+      const raceAccessToken = cookieValue(
+        refreshResult.headers['set-cookie'] as unknown as string[],
+        'portfolio_access',
+      )!;
+      const rejected = await request(app.getHttpServer())
+        .get('/api/v1/auth/session')
+        .set('Authorization', `Bearer ${raceAccessToken}`)
+        .expect(401);
+      expect(rejected.body.error.message).toMatch(/administrator session required/i);
+    }
+
+    // No active session can carry a tokenVersion older than the admin's
+    // current one — that's what "no concurrent refresh may restore a
+    // session after logout-all" means at the data level.
+    const activeSessions = await prisma.refreshSession.findMany({
+      where: { userId: admin.id, revokedAt: null },
+    });
+    const currentTokenVersion = (
+      await prisma.adminUser.findUniqueOrThrow({
+        where: { id: admin.id },
+      })
+    ).tokenVersion;
+    expect(activeSessions.every((s) => s.tokenVersion === currentTokenVersion)).toBe(true);
+  });
+
+  it('rejects a refresh from a session row that survived with a stale tokenVersion, and cannot issue tokens from it', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const accessToken = cookieValue(
+      login.headers['set-cookie'] as unknown as string[],
+      'portfolio_access',
+    )!;
+    const admin = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+    const staleTokenVersion = admin.tokenVersion;
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout-all')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(204);
+
+    // Manufacture the exact scenario a race could theoretically leave
+    // behind: an unrevoked RefreshSession row whose tokenVersion predates
+    // the admin's current one (e.g. a claim that committed a heartbeat
+    // before logout-all's transaction, or any other edge case) — proving
+    // the tokenVersion check alone (independent of revokedAt) is what
+    // keeps it dead, not just timing.
+    const staleRawToken = 'stale-surviving-refresh-token-for-test';
+    await prisma.refreshSession.create({
+      data: {
+        tokenHash: hashRefreshToken(staleRawToken),
+        userId: admin.id,
+        tokenVersion: staleTokenVersion,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const csrf = 'test-csrf-for-stale-row';
+    const rejected = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrf)
+      .set('Cookie', [`portfolio_refresh=${staleRawToken}`, `portfolio_csrf=${csrf}`])
+      .expect(401);
+    expect(rejected.body.error.code).toBe('SESSION_EXPIRED');
+
+    const staleRow = await prisma.refreshSession.findUnique({
+      where: { tokenHash: hashRefreshToken(staleRawToken) },
+    });
+    expect(staleRow?.revokedAt).toBeTruthy();
+
+    const reuseAudits = await prisma.auditLog.count({
+      where: { action: 'REFRESH_REUSE_DETECTED', actorId: admin.id },
+    });
+    expect(reuseAudits).toBeGreaterThanOrEqual(1);
+  });
+
+  it('serializes concurrent failed-login attempts so the lockout threshold is never lost', async () => {
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app.getHttpServer())
+          .post('/api/v1/auth/login')
+          .send({ email, password: 'Wrong-Password-9!' })
+          .expect(401),
+      ),
+    );
+
+    const admin = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+    // A read-then-write counter update would lose updates under this exact
+    // concurrency and could land well short of 5.
+    expect(admin.failedLoginCount).toBeGreaterThanOrEqual(5);
+    expect(admin.lockedUntil).toBeTruthy();
+
+    const locked = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password })
+      .expect(423);
+    expect(locked.body.error.code).toBe('ACCOUNT_LOCKED');
   });
 
   it('logs out the current session without disturbing others, and logout-all revokes every session', async () => {
