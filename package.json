@@ -18,7 +18,13 @@
     "admin:create": "tsx apps/api/scripts/admin-create.ts",
     "db:seed": "tsx prisma/seed.ts",
     "config:check": "tsx apps/api/scripts/config-check.ts && tsx apps/web/scripts/config-check.ts",
-    "smoke:containers": "bash scripts/container-smoke.sh"
+    "smoke:containers": "bash scripts/container-smoke.sh",
+    "smoke:deployment": "node scripts/deployment-smoke.mjs",
+    "staging:up": "bash scripts/staging.sh up",
+    "staging:down": "bash scripts/staging.sh down",
+    "staging:logs": "bash scripts/staging.sh logs",
+    "staging:smoke": "bash scripts/staging.sh smoke",
+    "staging:reset": "bash scripts/staging.sh reset"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.11.0",

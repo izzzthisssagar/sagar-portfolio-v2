@@ -1,0 +1,159 @@
+# Production-like local/staging rehearsal stack: real PostgreSQL, real MinIO as the S3-compatible
+# media backend, real Mailpit for SMTP inspection, and the actual production container images
+# (Dockerfile.api / Dockerfile.web) — never dev servers. See docs/deployment.md.
+#
+# Use `pnpm staging:up` / `staging:down` / `staging:logs` / `staging:smoke` / `staging:reset`
+# rather than invoking `docker compose` directly — those scripts handle `.env.staging`
+# provisioning and the explicit migration step this file deliberately does not run for you.
+#
+# Restart policy: every long-running service uses `unless-stopped` — this stack survives a host
+# reboot for a rehearsal that's meant to keep running, but a manual `staging:down` (or
+# `docker compose down`) always wins. The one-shot `minio-init` job uses `condition: none`
+# (default) since it must run to completion exactly once, not be kept alive.
+
+name: portfolio-staging
+
+networks:
+  staging:
+    driver: bridge
+
+volumes:
+  staging-postgres-data:
+  staging-minio-data:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [staging]
+    # Published to the host so `staging:up` can run `prisma migrate deploy` from outside the
+    # compose network as an explicit step before the API ever starts — see the top-of-file note.
+    ports:
+      - '${POSTGRES_PORT}:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - staging-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    networks: [staging]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - staging-minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Disposable-staging-only bucket provisioning — never how a real production bucket gets
+  # created. Runs once to completion and exits; not kept alive.
+  minio-init:
+    image: minio/mc
+    networks: [staging]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        mc alias set staging http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing staging/"$$MINIO_BUCKET"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+
+  # Local/staging notification inspection only — never a production SMTP relay. The API's SMTP
+  # adapter is pointed at this container so contact-form delivery can be verified end to end
+  # without ever sending real mail. See docs/contact-delivery.md.
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    networks: [staging]
+    ports:
+      - '8025:8025' # web UI — inspect captured mail at http://localhost:8025
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: '1'
+      MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      args:
+        RELEASE_SHA: ${RELEASE_SHA:-staging-local}
+    restart: unless-stopped
+    networks: [staging]
+    ports:
+      - '${API_PORT}:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET}
+      ACCESS_TOKEN_ISSUER: ${ACCESS_TOKEN_ISSUER}
+      ACCESS_TOKEN_AUDIENCE: ${ACCESS_TOKEN_AUDIENCE}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET}
+      WEB_URL: ${WEB_URL}
+      # Production-like S3 adapter, enabled against MinIO — never the local filesystem adapter.
+      MEDIA_STORAGE_DRIVER: s3
+      MEDIA_STORAGE_ENDPOINT: http://minio:9000
+      MEDIA_STORAGE_REGION: us-east-1
+      MEDIA_STORAGE_BUCKET: ${MINIO_BUCKET}
+      MEDIA_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MEDIA_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MEDIA_STORAGE_PUBLIC_BASE_URL: http://localhost:${API_PORT}/media
+      # Production-like SMTP adapter, enabled against Mailpit — never the capture driver.
+      CONTACT_NOTIFICATION_DRIVER: smtp
+      CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO}
+      SMTP_HOST: mailpit
+      SMTP_PORT: '1025'
+      SMTP_SECURE: 'false'
+      SMTP_USERNAME: staging
+      SMTP_PASSWORD: staging
+      SMTP_FROM: noreply@staging.invalid
+      SERVICE_NAME: portfolio-api-staging
+      RELEASE_SHA: ${RELEASE_SHA:-staging-local}
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
+        RELEASE_SHA: ${RELEASE_SHA:-staging-local}
+    restart: unless-stopped
+    networks: [staging]
+    ports:
+      - '${WEB_PORT}:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:4000
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
+      # Never enabled at runtime — only the build stage (Dockerfile.web) allows the static
+      # fallback, and only to enumerate SSG paths without depending on a live API at build time.
+      ALLOW_STATIC_CONTENT_FALLBACK: 'false'
