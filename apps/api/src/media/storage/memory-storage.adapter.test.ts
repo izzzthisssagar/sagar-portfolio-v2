@@ -18,4 +18,8 @@ describe('MemoryStorageAdapter', () => {
     expect(adapter.publicUrl('approved/a')).toBe('memory://approved/a');
     expect(adapter.publicUrl('quarantine/a')).toBeNull();
   });
+
+  it('ping() always reports ok', async () => {
+    expect(await new MemoryStorageAdapter().ping()).toEqual({ ok: true });
+  });
 });

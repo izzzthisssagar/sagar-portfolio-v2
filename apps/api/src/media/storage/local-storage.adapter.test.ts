@@ -50,4 +50,17 @@ describe('LocalStorageAdapter', () => {
     const noPublicUrl = new LocalStorageAdapter(root);
     expect(noPublicUrl.publicUrl('approved/abc.png')).toBeNull();
   });
+
+  it('ping() reports ok when the storage root is writable, creating it if missing', async () => {
+    const nested = new LocalStorageAdapter(join(root, 'not-yet-created'));
+    expect(await nested.ping()).toEqual({ ok: true });
+  });
+
+  it('ping() reports failure when the storage root cannot be created (parent path is a file)', async () => {
+    await adapter.put('blocking-file', Buffer.from('x'), 'text/plain');
+    const blocked = new LocalStorageAdapter(join(root, 'blocking-file', 'nested'));
+    const result = await blocked.ping();
+    expect(result.ok).toBe(false);
+    expect(result.detail).toBeTruthy();
+  });
 });

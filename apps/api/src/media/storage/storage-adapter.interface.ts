@@ -16,6 +16,10 @@ export interface MediaStorageAdapter {
    * isn't under `approved/`) — callers must treat null as "not servable", not fall back to
    * guessing a URL. */
   publicUrl(key: string): string | null;
+  /** Cheap reachability check for the readiness probe — never throws, and never uploads,
+   * downloads, or lists real content. Local: confirms the storage root directory exists and is
+   * writable. S3-compatible: a HeadBucket call (no object transfer). */
+  ping(): Promise<{ ok: boolean; detail?: string }>;
 }
 
 export const MEDIA_STORAGE = Symbol('MEDIA_STORAGE');

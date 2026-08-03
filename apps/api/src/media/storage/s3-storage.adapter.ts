@@ -2,6 +2,7 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -68,5 +69,16 @@ export class S3StorageAdapter implements MediaStorageAdapter {
   publicUrl(key: string): string | null {
     if (!this.publicBaseUrl || !key.startsWith('approved/')) return null;
     return `${this.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+  }
+
+  async ping(): Promise<{ ok: boolean; detail?: string }> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      return { ok: true };
+    } catch {
+      // Never surfaces the underlying error (may include endpoint/credentials context) — the
+      // readiness probe reports only "storage unavailable", never infrastructure detail.
+      return { ok: false, detail: 'storage endpoint unavailable' };
+    }
   }
 }
