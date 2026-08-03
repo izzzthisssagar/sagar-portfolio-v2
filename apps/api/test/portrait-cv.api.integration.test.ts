@@ -47,8 +47,21 @@ databaseSuite('Portrait and CV management', () => {
         expiresIn: '5m',
       },
     );
-    const profile = await prisma.profile.findFirst();
-    if (!profile) throw new Error('Profile row missing — run the content seed before this suite.');
+    // The real content seed (idempotent — prisma/seed-content.ts) may not have run yet at this
+    // point in CI (it runs after `pnpm test`, not before), so this can't assume a Profile row
+    // already exists. A minimal fixture row is created only if none does; the seed step later
+    // in the same CI job updates it in place to the real content regardless of which ran first.
+    const profile =
+      (await prisma.profile.findFirst()) ??
+      (await prisma.profile.create({
+        data: {
+          name: 'Portrait/CV Test Fixture',
+          headline: 'Test fixture headline',
+          bio: 'Created by portrait-cv.api.integration.test.ts — no Profile row existed yet.',
+          location: 'Test fixture',
+          availability: 'Test fixture',
+        },
+      }));
     profileId = profile.id;
     originalPortraitMediaId = profile.portraitMediaId;
   });
