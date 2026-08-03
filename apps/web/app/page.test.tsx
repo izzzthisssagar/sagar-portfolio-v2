@@ -17,6 +17,9 @@ vi.mock('@/lib/seo', () => ({
   personJsonLd: () => ({}),
   websiteJsonLd: () => ({}),
 }));
+vi.mock('@/lib/nonce.server', () => ({
+  getNonce: () => Promise.resolve(undefined),
+}));
 import Home from './page';
 describe('homepage semantics', () => {
   it('keeps the primary evidence and navigation path in HTML', async () => {

@@ -42,6 +42,34 @@ test('sitemap.xml lists published content and robots.txt disallows /admin', asyn
   await page.goto('/admin/login');
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
 });
+test('security headers are present and the JSON-LD nonce matches the CSP header', async ({
+  request,
+}) => {
+  // A raw request, not page.goto() — React deliberately strips the `nonce` attribute from
+  // `<script>` elements in the live DOM after hydration (so an XSS payload can't read it back
+  // out via document.querySelectorAll), so this has to inspect the actual server-rendered HTML.
+  const response = await request.get('/');
+  const headers = response.headers();
+  expect(headers['x-content-type-options']).toBe('nosniff');
+  expect(headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+  expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['permissions-policy']).toContain('camera=()');
+
+  const csp = headers['content-security-policy'];
+  expect(csp).toBeTruthy();
+  expect(csp).toContain("frame-ancestors 'none'");
+  expect(csp).toContain("object-src 'none'");
+  expect(csp).not.toContain('unsafe-inline');
+  // 'unsafe-eval' is intentionally present outside production only — React's dev-mode debugging
+  // uses eval() for component stack traces (never in production; see security-headers.ts). This
+  // suite runs against the dev server, so it's expected here, not something to assert against.
+  expect(csp).not.toMatch(/-src[^;]*\*/); // no wildcard source
+
+  const nonceMatch = csp.match(/'nonce-([a-f0-9]+)'/);
+  expect(nonceMatch).toBeTruthy();
+  const html = await response.text();
+  expect(html).toContain(`application/ld+json" nonce="${nonceMatch![1]}"`);
+});
 test('mobile navigation is keyboard and touch operable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

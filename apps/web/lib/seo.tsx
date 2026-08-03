@@ -91,11 +91,20 @@ function safeJsonLdStringify(data: object): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
-/** Renders a JSON-LD `<script>` tag. Server-only — call from a Server Component. */
-export function JsonLd({ data }: { data: object }) {
+/** Renders a JSON-LD `<script>` tag. Server-only — call from a Server Component.
+ *
+ * `nonce` should be the `x-nonce` request header proxy.ts sets on every request (and uses as the
+ * same value in the `Content-Security-Policy: script-src` header it sends back) — pass it via
+ * `(await headers()).get('x-nonce')` in the calling page. Without it, this inline script would be
+ * blocked by that CSP in any browser that enforces script-src against non-JS `<script>` types
+ * (which real browsers do, `application/ld+json` included). Kept a plain synchronous component
+ * (nonce read by the caller, not here) so it stays compatible with `renderToStaticMarkup` in
+ * lib/json-ld.test.tsx — an async component requires React's streaming renderer instead. */
+export function JsonLd({ data, nonce }: { data: object; nonce?: string | undefined }) {
   return (
     <script
       type="application/ld+json"
+      nonce={nonce}
       dangerouslySetInnerHTML={{ __html: safeJsonLdStringify(data) }}
     />
   );

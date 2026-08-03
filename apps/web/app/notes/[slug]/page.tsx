@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { renderMarkdown } from '@/lib/markdown';
+import { getNonce } from '@/lib/nonce.server';
 import { getPublishedPostBySlug, getPublishedPosts } from '@/lib/public-content.server';
 import { articleJsonLd, JsonLd } from '@/lib/seo';
 
@@ -38,11 +39,11 @@ export async function generateMetadata({
 
 export default async function Note({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const note = await getPublishedPostBySlug(slug);
+  const [note, nonce] = await Promise.all([getPublishedPostBySlug(slug), getNonce()]);
   if (!note) notFound();
   return (
     <main id="main" className="page-shell">
-      <JsonLd data={articleJsonLd(note)} />
+      <JsonLd data={articleJsonLd(note)} nonce={nonce} />
       <article className="container">
         <p className="eyebrow">Field Notes / {note.readingTime} min</p>
         <h1 className="display">{note.title}</h1>

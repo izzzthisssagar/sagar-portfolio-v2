@@ -75,6 +75,44 @@ example) is **not currently supported** — `TRUST_PROXY` only expresses "trust 
   public URL, and Swagger's own bundled inline script is incompatible with the strict
   `script-src` this CSP enforces everywhere else.
 
+## Web security headers (`apps/web/lib/security-headers.ts`, `apps/web/proxy.ts`)
+
+The API's headers above cover the JSON API only — the web app is a separate process with its own
+HTML responses and needed its own equivalent, applied by `proxy.ts` (broadened to match every
+request, not just `/admin/*`) rather than `next.config.ts`'s static `headers()`, since the CSP
+needs a fresh per-request nonce.
+
+- **Content-Security-Policy**: `default-src 'self'`, no wildcard directives.
+  - `script-src 'self' 'nonce-<random>'` — the nonce is generated per request
+    (`crypto.randomUUID()`) and applied to the one inline script this app renders itself
+    (JSON-LD, `lib/seo.tsx`'s `JsonLd`). It is **also** set on the incoming request's own
+    `Content-Security-Policy` header (not just the response) — this is required, not optional:
+    it's how Next.js knows to apply the same nonce to its own framework-injected inline scripts
+    (hydration bootstrap, RSC payload), which otherwise render with no nonce at all and get
+    silently blocked by the browser.
+  - `style-src 'self'` — no `unsafe-inline`; this codebase has no `style={{...}}` usage or
+    scripted `style` attribute writes to accommodate (verified by search).
+  - `unsafe-eval` is present in `script-src` **outside production only** — React's dev-mode
+    debugging (reconstructing component stacks) calls `eval()`; React's own console message
+    confirms it never does in production. Matches the same prod/dev split as
+    `upgrade-insecure-requests` below.
+  - `img-src`/`connect-src` include the API's origin (derived from `NEXT_PUBLIC_API_URL`) — every
+    other directive is `'self'` or `'none'`.
+  - `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`.
+  - `upgrade-insecure-requests`: production only, same reasoning as the API's HSTS.
+- **HSTS**: production only, same reasoning as the API.
+- **Referrer-Policy**: `strict-origin-when-cross-origin` (the API's is stricter — `no-referrer` —
+  since it never needs to send one; the web app's Referer header is occasionally useful for
+  same-origin analytics-free debugging, hence the looser-but-still-safe default).
+- **Permissions-Policy**, **X-Content-Type-Options**, **X-Frame-Options**,
+  **Cross-Origin-Resource-Policy**: same values and reasoning as the API's.
+- **Automated coverage**: `apps/web/lib/security-headers.test.ts` (unit, CSP string construction)
+  and `tests/e2e/smoke.spec.ts`'s `security headers are present and the JSON-LD nonce matches the
+  CSP header` test (e2e, against a real running server — reads the *raw response body*, not the
+  post-hydration DOM, since React deliberately strips the `nonce` attribute from `<script>`
+  elements after hydration so an XSS payload can't read it back out via
+  `document.querySelectorAll`).
+
 ## CORS
 
 Single-origin allowlist (`origin: env.WEB_URL, credentials: true`) — not a wildcard, not a

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { getNonce } from '@/lib/nonce.server';
 import { getPublishedProjectBySlug, getPublishedProjects } from '@/lib/public-content.server';
 import { creativeWorkJsonLd, JsonLd } from '@/lib/seo';
 
@@ -51,12 +52,12 @@ const SECTIONS = [
 
 export default async function CaseStudy({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const project = await getPublishedProjectBySlug(slug);
+  const [project, nonce] = await Promise.all([getPublishedProjectBySlug(slug), getNonce()]);
   if (!project) notFound();
 
   return (
     <main id="main" className="page-shell">
-      <JsonLd data={creativeWorkJsonLd(project)} />
+      <JsonLd data={creativeWorkJsonLd(project)} nonce={nonce} />
       <article className="container">
         <p className="eyebrow">Project / {project.status}</p>
         <h1 className="display">{project.title}</h1>

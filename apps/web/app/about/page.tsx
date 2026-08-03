@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { AboutSection } from '@/components/HomeSections';
+import { getNonce } from '@/lib/nonce.server';
 import { getActivePortrait, getPublicProfile } from '@/lib/public-content.server';
 import { JsonLd, personJsonLd, websiteJsonLd } from '@/lib/seo';
 
@@ -13,13 +14,17 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function About() {
-  const [portrait, profile] = await Promise.all([getActivePortrait(), getPublicProfile()]);
+  const [portrait, profile, nonce] = await Promise.all([
+    getActivePortrait(),
+    getPublicProfile(),
+    getNonce(),
+  ]);
   return (
     <main id="main">
       {profile && (
         <>
-          <JsonLd data={personJsonLd(profile)} />
-          <JsonLd data={websiteJsonLd()} />
+          <JsonLd data={personJsonLd(profile)} nonce={nonce} />
+          <JsonLd data={websiteJsonLd()} nonce={nonce} />
         </>
       )}
       <AboutSection portrait={portrait} />
