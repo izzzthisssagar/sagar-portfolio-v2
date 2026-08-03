@@ -26,7 +26,11 @@ export default async function Dashboard() {
     ['Pending evidence', data.pendingEvidence],
     ['Active sessions', data.activeSessions],
     ['Unread messages', data.unreadMessages],
+    ['Failed notifications', data.failedNotifications],
+    ['Published posts', data.publishedPosts],
+    ['Draft posts', data.draftPosts],
     ['Pending media', data.pendingMedia],
+    ['Rejected media', data.rejectedMedia],
   ];
 
   return (
@@ -61,6 +65,14 @@ export default async function Dashboard() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section aria-labelledby="dashboard-profile-heading">
+        <h2 id="dashboard-profile-heading">Profile documents</h2>
+        <p>
+          Portrait: {data.activePortraitConfigured ? 'configured' : 'not configured'}. CV:{' '}
+          {data.activeCvConfigured ? 'configured' : 'not configured'}.
+        </p>
       </section>
 
       <section aria-labelledby="dashboard-login-heading">

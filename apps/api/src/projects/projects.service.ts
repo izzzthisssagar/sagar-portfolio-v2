@@ -17,11 +17,39 @@ import { validateForPublication } from './publication-rules';
 
 const statusToDb = (status: string) => status.toUpperCase() as PublicationStatus;
 
+interface ProjectMediaRow {
+  id: string;
+  mediaId: string;
+  title: string | null;
+  caption: string | null;
+  altText: string | null;
+  evidenceStatus: EvidenceStatus;
+  order: number;
+}
+
+/** The only shape of project evidence ever returned to an unauthenticated caller. Deliberately
+ * enumerates every field rather than spreading the ProjectMedia row — a spread would silently
+ * start exposing any field added to the model later (internal timestamps, sourceNote, and
+ * critically the nested MediaAsset with its storageKey/sha256/createdById/metadata) without a
+ * reviewer having to touch this file. See docs/sprint-3.md. */
+function publicEvidenceView(row: ProjectMediaRow) {
+  return {
+    id: row.id,
+    mediaId: row.mediaId,
+    title: row.title,
+    caption: row.caption,
+    altText: row.altText,
+    evidenceStatus: row.evidenceStatus.toLowerCase(),
+    order: row.order,
+  };
+}
+
 function projectView<
   T extends {
     status: PublicationStatus;
     metrics?: { evidence: EvidenceStatus }[];
     findings?: { evidenceStatus: EvidenceStatus }[];
+    media?: { evidenceStatus: EvidenceStatus }[];
   },
 >(project: T) {
   return {
@@ -38,6 +66,47 @@ function projectView<
           })),
         }
       : {}),
+    ...(project.media
+      ? {
+          // Exposed as `evidence`, not `media` — `media` is the raw ProjectMedia relation name,
+          // `evidence` is the public-facing concept (see docs/sprint-3.md / ProjectMedia model
+          // comment in schema.prisma). Full CMS shape (nested MediaAsset included) — admin-only,
+          // never returned unauthenticated. See publicProjectView for the public equivalent.
+          evidence: project.media.map((m) => ({
+            ...m,
+            evidenceStatus: m.evidenceStatus.toLowerCase(),
+          })),
+        }
+      : {}),
+  };
+}
+
+/** Public counterpart to `projectView` — identical except evidence is mapped through
+ * `publicEvidenceView` instead of spread verbatim. Used only by `getPublicBySlug`. */
+function publicProjectView<
+  T extends {
+    status: PublicationStatus;
+    metrics?: { evidence: EvidenceStatus }[];
+    findings?: { evidenceStatus: EvidenceStatus }[];
+    media?: ProjectMediaRow[];
+  },
+>(project: T) {
+  const { media, ...rest } = project;
+  return {
+    ...rest,
+    status: rest.status.toLowerCase(),
+    ...(rest.metrics
+      ? { metrics: rest.metrics.map((m) => ({ ...m, evidence: m.evidence.toLowerCase() })) }
+      : {}),
+    ...(rest.findings
+      ? {
+          findings: rest.findings.map((f) => ({
+            ...f,
+            evidenceStatus: f.evidenceStatus.toLowerCase(),
+          })),
+        }
+      : {}),
+    ...(media ? { evidence: media.map(publicEvidenceView) } : {}),
   };
 }
 
@@ -106,10 +175,18 @@ export class ProjectsService {
         // claim); the admin API and draft preview return every metric.
         metrics: { where: { evidence: EvidenceStatus.CONFIRMED }, orderBy: { order: 'asc' } },
         findings: { orderBy: { order: 'asc' } },
+        // Same rule as metrics: only CONFIRMED evidence backed by a still-APPROVED asset is
+        // ever shown publicly — pending/unavailable evidence must never look confirmed, and an
+        // asset approved at attach-time but later archived/rejected stops appearing.
+        media: {
+          where: { evidenceStatus: EvidenceStatus.CONFIRMED, media: { status: 'APPROVED' } },
+          orderBy: { order: 'asc' },
+          include: { media: true },
+        },
       },
     });
     if (!project) throw new NotFoundException('Project not found');
-    return projectView(project);
+    return publicProjectView(project);
   }
 
   async getAdmin(id: string) {
@@ -118,6 +195,7 @@ export class ProjectsService {
       include: {
         metrics: { orderBy: { order: 'asc' } },
         findings: { orderBy: { order: 'asc' } },
+        media: { orderBy: { order: 'asc' }, include: { media: true } },
       },
     });
     if (!project) throw new NotFoundException('Project not found');

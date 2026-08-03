@@ -13,6 +13,8 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { type AdminRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CsrfGuard } from '../auth/csrf.guard';
+import { CreateProjectEvidenceDto, UpdateProjectEvidenceDto } from './project-evidence.dto';
+import { ProjectEvidenceService } from './project-evidence.service';
 import { ProjectFindingsService } from './project-findings.service';
 import { ProjectMetricsService } from './project-metrics.service';
 import {
@@ -50,6 +52,7 @@ export class AdminProjectsController {
     private readonly projects: ProjectsService,
     private readonly metrics: ProjectMetricsService,
     private readonly findings: ProjectFindingsService,
+    private readonly evidence: ProjectEvidenceService,
   ) {}
 
   @Get() list(@Query() query: ListProjectsDto) {
@@ -147,6 +150,41 @@ export class AdminProjectsController {
     @Req() request: AdminRequest,
   ) {
     await this.findings.remove(projectId, findingId, request.user?.sub);
+    return { data: { deleted: true } };
+  }
+
+  @Get(':projectId/evidence') async listEvidence(@Param('projectId') projectId: string) {
+    return { data: await this.evidence.list(projectId) };
+  }
+  @Post(':projectId/evidence') async createEvidence(
+    @Param('projectId') projectId: string,
+    @Body() input: CreateProjectEvidenceDto,
+    @Req() request: AdminRequest,
+  ) {
+    return { data: await this.evidence.create(projectId, input, request.user?.sub) };
+  }
+  @Patch(':projectId/evidence/reorder') async reorderEvidence(
+    @Param('projectId') projectId: string,
+    @Body() input: ReorderDto,
+    @Req() request: AdminRequest,
+  ) {
+    await this.evidence.reorder(projectId, input.orderedIds, request.user?.sub);
+    return { data: { reordered: true } };
+  }
+  @Patch(':projectId/evidence/:evidenceId') async updateEvidence(
+    @Param('projectId') projectId: string,
+    @Param('evidenceId') evidenceId: string,
+    @Body() input: UpdateProjectEvidenceDto,
+    @Req() request: AdminRequest,
+  ) {
+    return { data: await this.evidence.update(projectId, evidenceId, input, request.user?.sub) };
+  }
+  @Delete(':projectId/evidence/:evidenceId') async removeEvidence(
+    @Param('projectId') projectId: string,
+    @Param('evidenceId') evidenceId: string,
+    @Req() request: AdminRequest,
+  ) {
+    await this.evidence.remove(projectId, evidenceId, request.user?.sub);
     return { data: { deleted: true } };
   }
 }

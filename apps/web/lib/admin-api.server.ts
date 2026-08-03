@@ -1,11 +1,19 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import type {
+  AdminContactMessage,
+  AdminCvDocument,
   AdminFinding,
+  AdminMedia,
   AdminMetric,
+  AdminPost,
+  AdminProfile,
   AdminProject,
   AdminSession,
+  ContactMessageListResult,
   DashboardSummary,
+  MediaListResult,
+  PostListResult,
   ProjectListResult,
 } from './admin-api.client';
 
@@ -27,7 +35,11 @@ async function adminFetchRaw(path: string): Promise<unknown | null> {
 async function adminFetch<T>(path: string): Promise<T | null> {
   const payload = await adminFetchRaw(path);
   if (payload === null) return null;
-  return ((payload as { data?: unknown }).data ?? payload) as T;
+  // `payload.data ?? payload` would be wrong here: some endpoints (e.g. GET /admin/profile
+  // before a Profile row exists) legitimately return `{ data: null }`, and `??` treats that null
+  // as absent, falling back to the whole envelope instead of the intended `null`.
+  const data = typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+  return data as T;
 }
 
 export const adminServer = {
@@ -42,5 +54,17 @@ export const adminServer = {
     adminFetch(`/admin/projects/${projectId}/metrics`),
   listFindings: (projectId: string): Promise<AdminFinding[] | null> =>
     adminFetch(`/admin/projects/${projectId}/findings`),
+  listPosts: (qs = ''): Promise<PostListResult | null> =>
+    adminFetchRaw(`/admin/posts${qs}`) as Promise<PostListResult | null>,
+  getPost: (id: string): Promise<AdminPost | null> => adminFetch(`/admin/posts/${id}`),
+  listMedia: (qs = ''): Promise<MediaListResult | null> =>
+    adminFetchRaw(`/admin/media${qs}`) as Promise<MediaListResult | null>,
+  getMedia: (id: string): Promise<AdminMedia | null> => adminFetch(`/admin/media/${id}`),
+  getProfile: (): Promise<AdminProfile | null> => adminFetch('/admin/profile'),
+  listCv: (): Promise<AdminCvDocument[] | null> => adminFetch('/admin/cv'),
+  listMessages: (qs = ''): Promise<ContactMessageListResult | null> =>
+    adminFetchRaw(`/admin/messages${qs}`) as Promise<ContactMessageListResult | null>,
+  getMessage: (id: string): Promise<AdminContactMessage | null> =>
+    adminFetch(`/admin/messages/${id}`),
   dashboard: (): Promise<DashboardSummary | null> => adminFetch('/admin/dashboard'),
 };

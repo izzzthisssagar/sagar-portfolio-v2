@@ -10,7 +10,13 @@ import { ErrorEnvelopeFilter } from './shared';
  * traffic does, including cookie parsing the auth endpoints depend on.
  */
 export function configureApp(app: INestApplication) {
-  app.use(helmet());
+  // Helmet's default Cross-Origin-Resource-Policy is `same-origin`, which blocks the browser
+  // from loading cross-origin subresources like the admin media preview `<img src>` even though
+  // CORS allows the request — CORP is a separate, browser-enforced check CORS headers don't
+  // satisfy. `same-site` permits that (web:3000 -> api:4000 share a site, per the same-site
+  // deployment assumption the cookie/CSRF design already relies on) without opening it to
+  // genuinely cross-site origins.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-site' } }));
   app.use(cookieParser());
   app.enableCors({ origin: process.env.WEB_URL ?? 'http://localhost:3000', credentials: true });
   app.setGlobalPrefix('api/v1');

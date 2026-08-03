@@ -1,8 +1,11 @@
-import type { ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
+import type { PostRecord, ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
 import Link from 'next/link';
-import { notes } from '@/lib/content';
+import type { ActivePortrait } from '@/lib/public-content.server';
 import { SystemCanvas } from './SystemCanvas';
-export function Hero() {
+
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+
+export function Hero({ cvAvailable }: { cvAvailable: boolean }) {
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="container hero-grid">
@@ -23,9 +26,15 @@ export function Hero() {
             <Link className="button primary" href="/work">
               INSPECT MY WORK
             </Link>
-            <span className="button" aria-disabled="true" title="CV has not yet been supplied">
-              DOWNLOAD CV — PENDING
-            </span>
+            {cvAvailable ? (
+              <a className="button" href={`${PUBLIC_API_URL}/documents/cv`}>
+                DOWNLOAD CV
+              </a>
+            ) : (
+              <span className="button" aria-disabled="true" title="CV has not yet been supplied">
+                DOWNLOAD CV — PENDING
+              </span>
+            )}
           </div>
           <p className="capline">
             MANUAL QA / API TESTING / SECURITY / PERFORMANCE / AUTOMATION / TEST ARCHITECTURE /
@@ -172,7 +181,7 @@ export function MethodSection() {
     </section>
   );
 }
-export function FieldNotesSection() {
+export function FieldNotesSection({ notes }: { notes: PostRecord[] }) {
   return (
     <section className="section" aria-labelledby="notes-title">
       <div className="container">
@@ -181,9 +190,10 @@ export function FieldNotesSection() {
           <h2 id="notes-title">Evidence, written down.</h2>
         </div>
         <div className="notes">
+          {notes.length === 0 && <p>No Field Notes published yet.</p>}
           {notes.map((n) => (
             <article className="note" key={n.slug}>
-              <p className="eyebrow">Draft seed / {n.readingTime} min</p>
+              <p className="eyebrow">{n.readingTime} min</p>
               <h3>
                 <Link href={`/notes/${n.slug}`}>{n.title}</Link>
               </h3>
@@ -199,21 +209,32 @@ export function FieldNotesSection() {
     </section>
   );
 }
-export function AboutSection() {
+export function AboutSection({ portrait }: { portrait?: ActivePortrait | null } = {}) {
   return (
     <section className="section" aria-labelledby="about-title">
       <div className="container about">
-        <div
-          className="portrait-placeholder"
-          role="img"
-          aria-label="Portrait placeholder — approved portrait pending"
-        >
-          <p>
-            PORTRAIT ASSET PENDING
-            <br />
-            <small>Expected: /assets/images/portrait/sagar-portrait.png</small>
-          </p>
-        </div>
+        {portrait ? (
+          // eslint-disable-next-line @next/next/no-img-element -- public, approved-only asset served from the API
+          <img
+            src={`${PUBLIC_API_URL}/media/${portrait.mediaId}/file`}
+            alt={portrait.altText ?? 'Portrait of Sagar Thapa'}
+            className="portrait-image"
+            width={portrait.width ?? undefined}
+            height={portrait.height ?? undefined}
+          />
+        ) : (
+          <div
+            className="portrait-placeholder"
+            role="img"
+            aria-label="Portrait placeholder — approved portrait pending"
+          >
+            <p>
+              PORTRAIT ASSET PENDING
+              <br />
+              <small>Expected: /assets/images/portrait/sagar-portrait.png</small>
+            </p>
+          </div>
+        )}
         <div>
           <p className="eyebrow">06 / About</p>
           <h2 id="about-title">A tester who also builds the systems he wishes existed.</h2>

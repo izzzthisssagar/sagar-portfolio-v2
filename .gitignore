@@ -10,3 +10,5 @@ playwright-report/
 test-results/
 *.log
 .DS_Store
+# Local media storage adapter default output (MEDIA_STORAGE_LOCAL_PATH) — dev/test uploads only.
+apps/api/.data/

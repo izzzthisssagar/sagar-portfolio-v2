@@ -23,12 +23,20 @@ enum MediaStatus {
   QUARANTINED
   APPROVED
   REJECTED
+  ARCHIVED
+}
+
+enum MediaCategory {
+  IMAGE
+  DOCUMENT
 }
 
 enum ContactStatus {
   NEW
   READ
+  REPLIED
   ARCHIVED
+  SPAM
 }
 
 model AdminUser {
@@ -46,6 +54,7 @@ model AdminUser {
   updatedAt        DateTime         @updatedAt
   sessions         RefreshSession[]
   auditLogs        AuditLog[]
+  uploadedMedia    MediaAsset[]
 }
 
 model RefreshSession {
@@ -82,15 +91,20 @@ model AuditLog {
 }
 
 model Profile {
-  id           String   @id @default(cuid())
-  name         String
-  headline     String
-  bio          String
-  location     String
-  availability String
-  email        String?
-  cvMediaId    String?
-  updatedAt    DateTime @updatedAt
+  id              String      @id @default(cuid())
+  name            String
+  headline        String
+  bio             String
+  location        String
+  availability    String
+  email           String?
+  /// Legacy plain-string field, unenforced — superseded by CvDocument.active as the source of
+  /// truth for which CV is live (see docs/sprint-3.md). Left in place rather than migrated away
+  /// since nothing reads it.
+  cvMediaId       String?
+  portraitMediaId String?
+  portraitMedia   MediaAsset? @relation(fields: [portraitMediaId], references: [id], onDelete: SetNull)
+  updatedAt       DateTime    @updatedAt
 }
 
 model Experience {
@@ -172,17 +186,42 @@ model ProjectFinding {
   project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
+/// Project evidence — a MediaAsset attached to a Project with its own caption/status, distinct
+/// from the asset's own approval status. Only APPROVED MediaAsset rows may be attached
+/// (enforced in ProjectEvidenceService, not at the DB level, matching the rest of the app's
+/// publish-time-validation convention). See docs/sprint-3.md.
 model ProjectMedia {
-  id        String     @id @default(cuid())
-  caption   String?
-  altText   String?
-  order     Int        @default(0)
-  projectId String
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  mediaId   String
-  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  id             String         @id @default(cuid())
+  title          String?
+  caption        String?
+  altText        String?
+  sourceNote     String?
+  evidenceStatus EvidenceStatus @default(PENDING)
+  order          Int            @default(0)
+  projectId      String
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mediaId        String
+  media          MediaAsset     @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@unique([projectId, mediaId])
+}
+
+/// Tracks CV PDF versions uploaded through the media pipeline. Exactly one row may have
+/// `active = true` at a time — enforced transactionally in CvService AND by a partial unique
+/// index on (active) WHERE active = true (migration 20260803090512_cv_document_single_active_constraint;
+/// not representable in this schema language, so it exists only in that migration's raw SQL).
+/// The public CV download route serves whichever MediaAsset that row points to.
+model CvDocument {
+  id          String     @id @default(cuid())
+  mediaId     String     @unique
+  media       MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  title       String
+  versionNote String?
+  active      Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
 model BlogPost {
@@ -197,8 +236,12 @@ model BlogPost {
   publishedAt     DateTime?
   seoTitle        String
   seoDescription  String
+  canonicalUrl    String?
+  displayOrder    Int               @default(0)
   socialImageId   String?
+  socialImage     MediaAsset?       @relation("BlogPostSocialImage", fields: [socialImageId], references: [id], onDelete: SetNull)
   featuredImageId String?
+  featuredImage   MediaAsset?       @relation("BlogPostFeaturedImage", fields: [featuredImageId], references: [id], onDelete: SetNull)
   categoryId      String
   category        BlogCategory      @relation(fields: [categoryId], references: [id])
   tags            BlogTag[]
@@ -207,6 +250,8 @@ model BlogPost {
   relatedTo       BlogPost[]        @relation("RelatedPosts")
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
+  @@index([status, publishedAt])
 }
 
 model BlogCategory {
@@ -265,32 +310,68 @@ model GameAchievement {
 }
 
 model ContactMessage {
-  id        String        @id @default(cuid())
-  name      String
-  email     String
-  subject   String?
-  message   String
-  status    ContactStatus @default(NEW)
-  consentAt DateTime
-  createdAt DateTime      @default(now())
-  ipHash    String?
+  id               String                   @id @default(cuid())
+  name             String
+  email            String
+  subject          String?
+  company          String?
+  message          String
+  status           ContactStatus            @default(NEW)
+  consentAt        DateTime
+  createdAt        DateTime                 @default(now())
+  ipHash           String?
+  deliveryAttempts ContactDeliveryAttempt[]
+
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+}
+
+/// One row per notification-delivery attempt for a ContactMessage — never the message body or
+/// any personal data, only outcome. See docs/contact-delivery.md.
+model ContactDeliveryAttempt {
+  id               String         @id @default(cuid())
+  contactMessageId String
+  contactMessage   ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+  success          Boolean
+  reason           String?
+  createdAt        DateTime       @default(now())
+
+  @@index([contactMessageId])
 }
 
 model MediaAsset {
-  id         String         @id @default(cuid())
-  filename   String
-  storageKey String         @unique
-  mimeType   String
-  extension  String
-  byteSize   Int
-  sha256     String
-  status     MediaStatus    @default(QUARANTINED)
-  altText    String?
-  width      Int?
-  height     Int?
-  durationMs Int?
-  createdAt  DateTime       @default(now())
-  projects   ProjectMedia[]
+  id              String         @id @default(cuid())
+  filename        String
+  storageKey      String         @unique
+  mimeType        String
+  extension       String
+  category        MediaCategory
+  byteSize        Int
+  sha256          String
+  status          MediaStatus    @default(QUARANTINED)
+  altText         String?
+  decorative      Boolean        @default(false)
+  caption         String?
+  sourceNote      String?
+  rejectionReason String?
+  width           Int?
+  height          Int?
+  durationMs      Int?
+  metadata        Json?
+  createdById     String?
+  createdBy       AdminUser?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  projects        ProjectMedia[]
+  socialFor       BlogPost[]     @relation("BlogPostSocialImage")
+  featuredFor     BlogPost[]     @relation("BlogPostFeaturedImage")
+  portraitFor     Profile[]
+  cvDocument      CvDocument?
+
+  @@index([status])
+  @@index([category])
+  @@index([sha256])
 }
 
 model SiteSetting {

@@ -1,6 +1,6 @@
 import 'server-only';
-import type { ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
-import { projects as fallbackProjects } from './content';
+import type { PostRecord, ProjectDetailRecord, ProjectRecord } from '@portfolio/types';
+import { notes as fallbackNotes, projects as fallbackProjects } from './content';
 
 const API_URL = process.env.API_URL
   ? `${process.env.API_URL}/api/v1`
@@ -41,7 +41,13 @@ async function publicFetch<T>(path: string): Promise<FetchOutcome<T>> {
     if (response.status === 404) return { status: 'not_found' };
     if (!response.ok) return { status: 'unavailable' };
     const payload = await response.json();
-    return { status: 'ok', data: (payload.data ?? payload) as T };
+    // `payload.data ?? payload` would be wrong here: some endpoints (e.g. the portrait/CV
+    // "not configured" case) legitimately return `{ data: null }`, and `??` treats that null as
+    // absent, falling back to the whole envelope instead of the intended `null`. Check for the
+    // key's presence instead of nullish-coalescing its value.
+    const data =
+      payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+    return { status: 'ok', data: data as T };
   } catch {
     return { status: 'unavailable' };
   }
@@ -64,6 +70,56 @@ export async function getPublishedProjects(): Promise<ProjectRecord[]> {
   throw new PublicContentUnavailableError('the project list API request failed');
 }
 
+/** The legacy static seed (`lib/content.ts`) is `ArticleRecord`-shaped, not `PostRecord`-shaped —
+ * adapt it for the (currently always-empty, since none of the static articles are `published`)
+ * fallback path so the function signature stays honest about what it returns. */
+function toPostRecord(article: (typeof fallbackNotes)[number]): PostRecord {
+  return {
+    id: article.slug,
+    title: article.title,
+    slug: article.slug,
+    excerpt: article.excerpt,
+    body: article.body,
+    status: article.status,
+    publishedAt: article.publishedDate ?? null,
+    readingTime: article.readingTime,
+    author: article.author,
+    tags: article.tags,
+    seoTitle: article.seoTitle,
+    seoDescription: article.seoDescription,
+  };
+}
+
+export async function getPublishedPosts(): Promise<PostRecord[]> {
+  const result = await publicFetch<PostRecord[]>('/posts?limit=100');
+  if (result.status === 'ok') return result.data;
+  if (result.status === 'not_found') return [];
+  if (staticFallbackAllowed()) {
+    console.warn('[public-content] API unavailable — using local development fallback content.');
+    return fallbackNotes.filter((note) => note.status === 'published').map(toPostRecord);
+  }
+  throw new PublicContentUnavailableError('the post list API request failed');
+}
+
+export async function getPublishedPostBySlug(slug: string): Promise<PostRecord | null> {
+  const result = await publicFetch<PostRecord>(`/posts/${slug}`);
+  if (result.status === 'ok') return result.data;
+  if (result.status === 'not_found') return null;
+  if (staticFallbackAllowed()) {
+    const fallback = fallbackNotes.find(
+      (note) => note.slug === slug && note.status === 'published',
+    );
+    if (fallback) {
+      console.warn(
+        `[public-content] API unavailable — using local development fallback for "${slug}".`,
+      );
+      return toPostRecord(fallback);
+    }
+    return null;
+  }
+  throw new PublicContentUnavailableError(`the post API request for "${slug}" failed`);
+}
+
 export async function getPublishedProjectBySlug(slug: string): Promise<ProjectDetailRecord | null> {
   const result = await publicFetch<ProjectDetailRecord>(`/projects/${slug}`);
   if (result.status === 'ok') return result.data;
@@ -81,4 +137,55 @@ export async function getPublishedProjectBySlug(slug: string): Promise<ProjectDe
     return null;
   }
   throw new PublicContentUnavailableError(`the project API request for "${slug}" failed`);
+}
+
+export interface PublicProfile {
+  name: string;
+  headline: string;
+  bio: string;
+}
+
+/**
+ * Sources the Person/WebSite structured data and homepage/About metadata (see docs/seo.md).
+ * Soft-fails to `null` rather than throwing — a missing Profile row means the content seed
+ * hasn't run yet, which the page components already treat as "nothing to render" for the
+ * static hero copy; JSON-LD/metadata generation should degrade the same way, not 500 the page.
+ */
+export async function getPublicProfile(): Promise<PublicProfile | null> {
+  const result = await publicFetch<PublicProfile | null>('/profile');
+  return result.status === 'ok' ? result.data : null;
+}
+
+export interface ActivePortrait {
+  mediaId: string;
+  altText: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+/**
+ * Unlike projects/posts, an absent portrait or CV is a normal, expected state (see
+ * docs/sprint-3.md — "no portrait/CV supplied yet" is a stop condition acknowledged up front,
+ * not an outage), so these soft-fail to "not configured" rather than throwing — the public About
+ * page's existing text/layout placeholder is the deliberate fallback, not a masked failure.
+ */
+export async function getActivePortrait(): Promise<ActivePortrait | null> {
+  const result = await publicFetch<ActivePortrait | null>('/profile/portrait');
+  return result.status === 'ok' ? result.data : null;
+}
+
+export function portraitFileUrl(mediaId: string): string {
+  return `${API_URL}/media/${mediaId}/file`;
+}
+
+export async function getCvAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}/documents/cv`, {
+      method: 'HEAD',
+      next: { revalidate: 60 },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }

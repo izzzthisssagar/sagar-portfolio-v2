@@ -38,6 +38,11 @@ jobs:
       # API_URL there would make every cookie-authenticated mutation in
       # those specs fail Host validation.
       NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+      # Required in production (apps/web/lib/seo.ts fails closed at build time
+      # when unset, deliberately — see docs/seo.md) for metadata/JSON-LD/
+      # sitemap/robots absolute-URL generation. `pnpm build` runs Next.js in
+      # production mode, so this must be set at job scope, not just per-step.
+      PUBLIC_SITE_URL: http://127.0.0.1:3000
       ADMIN_EMAIL: ci-admin@example.invalid
       ADMIN_PASSWORD: Ci-Only-Test-Admin-Password-9!
       # Explicit and off — CI must fail visibly on a broken API/content
@@ -88,6 +93,12 @@ jobs:
         run: pnpm --filter @portfolio/api exec nest start &
         env:
           API_URL: http://127.0.0.1:4000
+          # Raises only this CI instance's app-wide rate-limit budget (production default,
+          # apps/api/src/app.module.ts, stays 60 req/60s/IP) — the sequential 25-spec Playwright
+          # suite that reuses this same server can exceed 60 of its own necessary request volume
+          # within a single 60s window on its own; see docs/sprint-3.md "Known limitations" and
+          # playwright.config.ts.
+          RATE_LIMIT_MAX: '300'
       - name: Wait for the API to become healthy
         run: |
           for i in $(seq 1 30); do

@@ -37,6 +37,16 @@ export interface ProjectRecord {
   sceneState: SystemSceneState;
   metrics: ProjectMetric[];
 }
+export interface ProjectEvidence {
+  id?: string;
+  title?: string | null;
+  caption?: string | null;
+  altText?: string | null;
+  sourceNote?: string | null;
+  evidenceStatus: EvidenceState;
+  order?: number;
+  mediaId?: string;
+}
 export interface ProjectDetailRecord extends ProjectRecord {
   overview?: string | null;
   context?: string | null;
@@ -51,6 +61,7 @@ export interface ProjectDetailRecord extends ProjectRecord {
   labels?: string[];
   publishedAt?: string | null;
   findings: ProjectFinding[];
+  evidence?: ProjectEvidence[];
 }
 
 export interface ArticleRecord {
@@ -70,6 +81,24 @@ export interface ArticleRecord {
   socialImage?: string;
   relatedProjects: string[];
   relatedArticles: string[];
+}
+
+/** Database-backed Field Notes article, distinct from the legacy static `ArticleRecord` seed
+ * shape above (which `apps/web/lib/content.ts` still holds as the fallback/seed source). */
+export interface PostRecord {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  body: string;
+  status: PublicationStatus;
+  publishedAt?: string | null;
+  readingTime: number;
+  author: string;
+  tags: string[];
+  seoTitle: string;
+  seoDescription: string;
+  canonicalUrl?: string | null;
 }
 
 export interface ApiErrorEnvelope {
