@@ -10,26 +10,30 @@ import {
   QARiftTeaser,
 } from '@/components/HomeSections';
 import {
+  getActivePortrait,
+  getCvAvailable,
   getPublishedPosts,
   getPublishedProjectBySlug,
   getPublishedProjects,
 } from '@/lib/public-content.server';
 
 export default async function Home() {
-  const [projects, qaMastery, notes] = await Promise.all([
+  const [projects, qaMastery, notes, portrait, cvAvailable] = await Promise.all([
     getPublishedProjects(),
     getPublishedProjectBySlug('qa-mastery'),
     getPublishedPosts(),
+    getActivePortrait(),
+    getCvAvailable(),
   ]);
   return (
     <main id="main">
-      <Hero />
+      <Hero cvAvailable={cvAvailable} />
       <EvidenceSection />
       <QAMasterySection project={qaMastery} />
       <ProjectIndex projects={projects} />
       <MethodSection />
       <FieldNotesSection notes={notes} />
-      <AboutSection />
+      <AboutSection portrait={portrait} />
       <QARiftTeaser />
       <ContactFooter />
     </main>

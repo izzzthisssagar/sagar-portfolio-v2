@@ -8,6 +8,8 @@ vi.mock('@/lib/public-content.server', () => ({
   getPublishedProjects: () => Promise.resolve([]),
   getPublishedProjectBySlug: () => Promise.resolve(null),
   getPublishedPosts: () => Promise.resolve([]),
+  getActivePortrait: () => Promise.resolve(null),
+  getCvAvailable: () => Promise.resolve(false),
 }));
 import Home from './page';
 describe('homepage semantics', () => {

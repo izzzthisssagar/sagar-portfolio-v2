@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { EvidenceEditor } from '@/components/EvidenceEditor';
 import { FindingsEditor } from '@/components/FindingsEditor';
 import { MetricsEditor } from '@/components/MetricsEditor';
 import { ProjectForm } from '@/components/ProjectForm';
@@ -20,6 +21,7 @@ export default async function EditProjectPage({ params }: { params: Promise<{ id
       <ProjectForm mode="edit" project={project} />
       <MetricsEditor projectId={project.id} initial={project.metrics ?? []} />
       <FindingsEditor projectId={project.id} initial={project.findings ?? []} />
+      <EvidenceEditor projectId={project.id} initial={project.evidence ?? []} />
     </main>
   );
 }

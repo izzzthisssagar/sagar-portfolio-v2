@@ -41,7 +41,13 @@ async function publicFetch<T>(path: string): Promise<FetchOutcome<T>> {
     if (response.status === 404) return { status: 'not_found' };
     if (!response.ok) return { status: 'unavailable' };
     const payload = await response.json();
-    return { status: 'ok', data: (payload.data ?? payload) as T };
+    // `payload.data ?? payload` would be wrong here: some endpoints (e.g. the portrait/CV
+    // "not configured" case) legitimately return `{ data: null }`, and `??` treats that null as
+    // absent, falling back to the whole envelope instead of the intended `null`. Check for the
+    // key's presence instead of nullish-coalescing its value.
+    const data =
+      payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+    return { status: 'ok', data: data as T };
   } catch {
     return { status: 'unavailable' };
   }
@@ -130,4 +136,38 @@ export async function getPublishedProjectBySlug(slug: string): Promise<ProjectDe
     return null;
   }
   throw new PublicContentUnavailableError(`the project API request for "${slug}" failed`);
+}
+
+export interface ActivePortrait {
+  mediaId: string;
+  altText: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+/**
+ * Unlike projects/posts, an absent portrait or CV is a normal, expected state (see
+ * docs/sprint-3.md — "no portrait/CV supplied yet" is a stop condition acknowledged up front,
+ * not an outage), so these soft-fail to "not configured" rather than throwing — the public About
+ * page's existing text/layout placeholder is the deliberate fallback, not a masked failure.
+ */
+export async function getActivePortrait(): Promise<ActivePortrait | null> {
+  const result = await publicFetch<ActivePortrait | null>('/profile/portrait');
+  return result.status === 'ok' ? result.data : null;
+}
+
+export function portraitFileUrl(mediaId: string): string {
+  return `${API_URL}/media/${mediaId}/file`;
+}
+
+export async function getCvAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}/documents/cv`, {
+      method: 'HEAD',
+      next: { revalidate: 60 },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }

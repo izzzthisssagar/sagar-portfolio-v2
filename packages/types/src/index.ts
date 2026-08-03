@@ -37,6 +37,16 @@ export interface ProjectRecord {
   sceneState: SystemSceneState;
   metrics: ProjectMetric[];
 }
+export interface ProjectEvidence {
+  id?: string;
+  title?: string | null;
+  caption?: string | null;
+  altText?: string | null;
+  sourceNote?: string | null;
+  evidenceStatus: EvidenceState;
+  order?: number;
+  mediaId?: string;
+}
 export interface ProjectDetailRecord extends ProjectRecord {
   overview?: string | null;
   context?: string | null;
@@ -51,6 +61,7 @@ export interface ProjectDetailRecord extends ProjectRecord {
   labels?: string[];
   publishedAt?: string | null;
   findings: ProjectFinding[];
+  evidence?: ProjectEvidence[];
 }
 
 export interface ArticleRecord {

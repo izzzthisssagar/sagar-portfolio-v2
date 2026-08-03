@@ -29,6 +29,9 @@ export async function generateMetadata({
   };
 }
 
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+const evidenceFileUrl = (mediaId: string) => `${PUBLIC_API_URL}/media/${mediaId}/file`;
+
 const SECTIONS = [
   { key: 'overview', label: 'Overview' },
   { key: 'context', label: 'Context' },
@@ -98,6 +101,21 @@ export default async function CaseStudy({ params }: { params: Promise<{ slug: st
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {project.evidence && project.evidence.length > 0 && (
+          <section className="section">
+            <h2>Evidence</h2>
+            <div className="evidence-grid">
+              {project.evidence.map((row) => (
+                <figure className="evidence-item" key={row.mediaId}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- public, approved-only asset served from the API, not a Next-optimizable local/remote source */}
+                  <img src={evidenceFileUrl(row.mediaId!)} alt={row.altText ?? row.title ?? ''} />
+                  {row.caption && <figcaption>{row.caption}</figcaption>}
+                </figure>
+              ))}
+            </div>
           </section>
         )}
       </article>

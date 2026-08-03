@@ -79,6 +79,23 @@ export default async function ProjectPreviewPage({ params }: { params: Promise<{
               </ul>
             </section>
           )}
+
+          {project.evidence && project.evidence.length > 0 && (
+            <section className="section">
+              <h2>Evidence</h2>
+              <ul>
+                {project.evidence.map((row) => (
+                  <li key={row.id}>
+                    <span className={`evidence-badge evidence-badge--${row.evidenceStatus}`}>
+                      {row.evidenceStatus}
+                    </span>{' '}
+                    <strong>{row.title || row.media?.filename || 'Untitled evidence'}</strong>
+                    {row.caption ? ` — ${row.caption}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </article>
       </div>
     </main>

@@ -1,8 +1,10 @@
 import { AboutSection } from '@/components/HomeSections';
-export default function About() {
+import { getActivePortrait } from '@/lib/public-content.server';
+export default async function About() {
+  const portrait = await getActivePortrait();
   return (
     <main id="main">
-      <AboutSection />
+      <AboutSection portrait={portrait} />
     </main>
   );
 }

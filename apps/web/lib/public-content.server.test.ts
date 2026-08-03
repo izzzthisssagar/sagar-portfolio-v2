@@ -131,4 +131,33 @@ describe('public-content.server — ALLOW_STATIC_CONTENT_FALLBACK boundary', () 
     const posts = await getPublishedPosts();
     expect(Array.isArray(posts)).toBe(true);
   });
+
+  it('portrait: a legitimate `{ data: null }` response (no portrait configured) unwraps to null, not the envelope', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    const { getActivePortrait } = await import('./public-content.server');
+    await expect(getActivePortrait()).resolves.toBeNull();
+  });
+
+  it('portrait: a configured portrait unwraps to the record', async () => {
+    const record = { mediaId: 'm1', altText: 'A portrait.', width: 20, height: 20 };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: record }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    const { getActivePortrait } = await import('./public-content.server');
+    await expect(getActivePortrait()).resolves.toEqual(record);
+  });
 });

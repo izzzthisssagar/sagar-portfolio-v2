@@ -112,7 +112,11 @@ async function apiFetchRaw(
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const payload = await apiFetchRaw(path, init);
-  return ((payload as { data?: unknown } | null)?.data ?? payload) as T;
+  // `payload?.data ?? payload` would be wrong here: some endpoints (e.g. GET /admin/profile
+  // before a Profile row exists) legitimately return `{ data: null }`, and `??` treats that null
+  // as absent, falling back to the whole envelope instead of the intended `null`.
+  const data = payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+  return data as T;
 }
 
 export interface AdminSession {
@@ -156,6 +160,7 @@ export interface AdminProject {
   updatedAt: string;
   metrics?: AdminMetric[];
   findings?: AdminFinding[];
+  evidence?: AdminEvidence[];
 }
 
 export interface AdminMetric {
@@ -178,6 +183,19 @@ export interface AdminFinding {
   projectId: string;
 }
 
+export interface AdminEvidence {
+  id: string;
+  title?: string | null;
+  caption?: string | null;
+  altText?: string | null;
+  sourceNote?: string | null;
+  evidenceStatus: 'confirmed' | 'pending' | 'unavailable';
+  order: number;
+  projectId: string;
+  mediaId: string;
+  media?: AdminMedia;
+}
+
 /** Write-shape inputs use `undefined` for "not set" (omit the key); the
  * read shapes above use `null` because that's what the database returns.
  * Keeping these separate avoids exactOptionalPropertyTypes friction at
@@ -193,6 +211,15 @@ export interface FindingInput {
   title: string;
   summary: string;
   severity?: string;
+  evidenceStatus: 'confirmed' | 'pending' | 'unavailable';
+  order: number;
+}
+export interface EvidenceInput {
+  mediaId: string;
+  title?: string;
+  caption?: string;
+  altText?: string;
+  sourceNote?: string;
   evidenceStatus: 'confirmed' | 'pending' | 'unavailable';
   order: number;
 }
@@ -302,6 +329,29 @@ export const projects = {
       }),
     reorder: (projectId: string, orderedIds: string[]) =>
       apiFetch<{ reordered: true }>(`/admin/projects/${projectId}/findings/reorder`, {
+        method: 'PATCH',
+        body: JSON.stringify({ orderedIds }),
+      }),
+  },
+
+  evidence: {
+    list: (projectId: string) => apiFetch<AdminEvidence[]>(`/admin/projects/${projectId}/evidence`),
+    create: (projectId: string, input: EvidenceInput) =>
+      apiFetch<AdminEvidence>(`/admin/projects/${projectId}/evidence`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    update: (projectId: string, evidenceId: string, input: Partial<EvidenceInput>) =>
+      apiFetch<AdminEvidence>(`/admin/projects/${projectId}/evidence/${evidenceId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    remove: (projectId: string, evidenceId: string) =>
+      apiFetch<{ deleted: true }>(`/admin/projects/${projectId}/evidence/${evidenceId}`, {
+        method: 'DELETE',
+      }),
+    reorder: (projectId: string, orderedIds: string[]) =>
+      apiFetch<{ reordered: true }>(`/admin/projects/${projectId}/evidence/reorder`, {
         method: 'PATCH',
         body: JSON.stringify({ orderedIds }),
       }),
@@ -472,6 +522,47 @@ export const media = {
     }),
   archive: (id: string) => apiFetch<AdminMedia>(`/admin/media/${id}/archive`, { method: 'POST' }),
   remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/media/${id}`, { method: 'DELETE' }),
+};
+
+export interface AdminProfile {
+  id: string;
+  name: string;
+  headline: string;
+  bio: string;
+  location: string;
+  availability: string;
+  email?: string | null;
+  portraitMediaId?: string | null;
+  portraitMedia?: { id: string; altText: string | null; status: string } | null;
+}
+
+export const profile = {
+  get: () => apiFetch<AdminProfile | null>('/admin/profile'),
+  setPortrait: (mediaId: string) =>
+    apiFetch<AdminProfile>('/admin/profile/portrait', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId }),
+    }),
+  clearPortrait: () => apiFetch<AdminProfile>('/admin/profile/portrait', { method: 'DELETE' }),
+};
+
+export interface AdminCvDocument {
+  id: string;
+  title: string;
+  versionNote?: string | null;
+  active: boolean;
+  createdAt: string;
+  mediaId: string;
+  media?: AdminMedia;
+}
+
+export const cv = {
+  list: () => apiFetch<AdminCvDocument[]>('/admin/cv'),
+  create: (input: { mediaId: string; title: string; versionNote?: string }) =>
+    apiFetch<AdminCvDocument>('/admin/cv', { method: 'POST', body: JSON.stringify(input) }),
+  activate: (id: string) =>
+    apiFetch<AdminCvDocument>(`/admin/cv/${id}/activate`, { method: 'POST' }),
+  remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/cv/${id}`, { method: 'DELETE' }),
 };
 
 export interface DashboardSummary {
