@@ -5,8 +5,6 @@ export const ACCESS_TOKEN_COOKIE = 'portfolio_access';
 export const REFRESH_TOKEN_COOKIE = 'portfolio_refresh';
 export const CSRF_TOKEN_COOKIE = 'portfolio_csrf';
 
-const AUTH_PATH = '/api/v1/auth';
-
 const isProduction = () => process.env.NODE_ENV === 'production';
 
 const baseCookie: CookieOptions = {
@@ -24,9 +22,14 @@ export function setAccessCookie(response: Response, token: string) {
 }
 
 export function setRefreshCookie(response: Response, token: string) {
+  // Path `/` (not scoped to `/api/v1/auth`): the Next.js proxy middleware
+  // needs this cookie on `/admin/*` requests to silently refresh an expired
+  // access token before the CMS renders, which only happens if the browser
+  // actually attaches it there — a narrower path silently starves that
+  // entirely, since cookie-path matching is exact-prefix, not "same site".
   response.cookie(REFRESH_TOKEN_COOKIE, token, {
     ...baseCookie,
-    path: AUTH_PATH,
+    path: '/',
     maxAge: REFRESH_TOKEN_SECONDS * 1000,
   });
 }
@@ -44,7 +47,7 @@ export function setCsrfCookie(response: Response, token: string) {
 
 export function clearAuthCookies(response: Response) {
   response.clearCookie(ACCESS_TOKEN_COOKIE, { ...baseCookie, path: '/' });
-  response.clearCookie(REFRESH_TOKEN_COOKIE, { ...baseCookie, path: AUTH_PATH });
+  response.clearCookie(REFRESH_TOKEN_COOKIE, { ...baseCookie, path: '/' });
   response.clearCookie(CSRF_TOKEN_COOKIE, {
     sameSite: 'strict',
     secure: isProduction(),

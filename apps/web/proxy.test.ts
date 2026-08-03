@@ -95,11 +95,14 @@ describe('admin proxy JWT boundary', () => {
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it('silently refreshes an expired access token using the refresh cookie', async () => {
+  it('redirects back to the original URL with rotated cookies instead of continuing the stale request', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(null, {
         status: 200,
-        headers: [['set-cookie', 'portfolio_access=new-token; Path=/; HttpOnly']],
+        headers: [
+          ['set-cookie', 'portfolio_access=new-access-token; Path=/; HttpOnly'],
+          ['set-cookie', 'portfolio_refresh=new-refresh-token; Path=/api/v1/auth; HttpOnly'],
+        ],
       }),
     );
     const { proxy } = await import('./proxy');
@@ -113,8 +116,54 @@ describe('admin proxy JWT boundary', () => {
       expect.stringContaining('/auth/refresh'),
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(response.status).toBe(200);
-    expect(response.headers.get('x-middleware-next')).toBe('1');
+    // Must NOT continue the original (stale-cookie) request — downstream
+    // server components would still see the expired access cookie.
+    expect(response.headers.get('x-middleware-next')).not.toBe('1');
+    expect(response.status).toBe(307);
+    // Redirects back to the same URL the browser originally requested.
+    expect(response.headers.get('location')).toBe('http://localhost:3000/admin/dashboard');
+    const setCookies = response.headers.getSetCookie();
+    expect(setCookies.some((c) => c.startsWith('portfolio_access=new-access-token'))).toBe(true);
+    expect(setCookies.some((c) => c.startsWith('portfolio_refresh=new-refresh-token'))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('preserves query parameters on the post-refresh redirect', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: [['set-cookie', 'portfolio_access=new-token; Path=/; HttpOnly']],
+      }),
+    );
+    const { proxy } = await import('./proxy');
+    const req = new NextRequest('http://localhost:3000/admin/projects?page=2&status=draft', {
+      headers: {
+        cookie: [
+          `portfolio_access=${await token({ expiresAt: Math.floor(Date.now() / 1000) - 60 })}`,
+          'portfolio_refresh=a-refresh-token',
+          'portfolio_csrf=a-csrf-token',
+        ].join('; '),
+      },
+    });
+    const response = await proxy(req);
+    expect(response.headers.get('location')).toBe(
+      'http://localhost:3000/admin/projects?page=2&status=draft',
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('does not attempt a second refresh after a refreshed redirect still fails to authenticate (loop prevention)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const { proxy } = await import('./proxy');
+    const req = request(await token({ expiresAt: Math.floor(Date.now() / 1000) - 60 }), {
+      portfolio_refresh: 'a-refresh-token',
+      portfolio_csrf: 'a-csrf-token',
+      portfolio_refresh_attempt: '1',
+    });
+    const response = await proxy(req);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/admin/login');
     fetchSpy.mockRestore();
   });
 
