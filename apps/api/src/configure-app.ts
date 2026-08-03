@@ -1,7 +1,21 @@
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { getConfig } from './config';
+import { createAccessLogMiddleware } from './logging/access-log.middleware';
+import { requestIdMiddleware } from './logging/request-id';
+import { StructuredLogger } from './logging/structured-logger';
 import { ErrorEnvelopeFilter } from './shared';
+
+export function buildStructuredLogger(): StructuredLogger {
+  const env = getConfig();
+  return new StructuredLogger({
+    serviceName: env.SERVICE_NAME,
+    releaseSha: env.RELEASE_SHA,
+    format: env.LOG_FORMAT ?? (env.NODE_ENV === 'production' ? 'json' : 'pretty'),
+    level: env.LOG_LEVEL,
+  });
+}
 
 /**
  * Single place that assembles the HTTP pipeline (helmet, cookies, CORS,
@@ -10,6 +24,11 @@ import { ErrorEnvelopeFilter } from './shared';
  * traffic does, including cookie parsing the auth endpoints depend on.
  */
 export function configureApp(app: INestApplication) {
+  const logger = buildStructuredLogger();
+  // Request id first — every later middleware/filter (the access log, the error envelope) reads
+  // `req.id`, which must already exist by the time they run.
+  app.use(requestIdMiddleware);
+  app.use(createAccessLogMiddleware(logger));
   // Helmet's default Cross-Origin-Resource-Policy is `same-origin`, which blocks the browser
   // from loading cross-origin subresources like the admin media preview `<img src>` even though
   // CORS allows the request — CORP is a separate, browser-enforced check CORS headers don't
@@ -23,6 +42,6 @@ export function configureApp(app: INestApplication) {
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
-  app.useGlobalFilters(new ErrorEnvelopeFilter());
+  app.useGlobalFilters(new ErrorEnvelopeFilter(logger));
   return app;
 }

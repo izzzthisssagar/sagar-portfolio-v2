@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { configureApp } from './configure-app';
+import { buildStructuredLogger, configureApp } from './configure-app';
 import { getConfig } from './config';
 import { registerGracefulShutdown } from './shutdown';
 
@@ -12,6 +12,10 @@ export async function bootstrap() {
   // process serving traffic against broken configuration.
   const env = getConfig();
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // Nest's own lifecycle/module-init logs were buffered (`bufferLogs: true`) until now — this
+  // flushes them through the same structured/redacted pipeline as application logging, not the
+  // framework's plain-text default.
+  app.useLogger(buildStructuredLogger());
   configureApp(app);
   // Runs every OnModuleDestroy hook (Prisma's disconnect among them) when the app closes —
   // without this, registerGracefulShutdown's app.close() would stop accepting requests but

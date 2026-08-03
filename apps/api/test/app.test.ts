@@ -55,4 +55,30 @@ describe('API v1 contracts', () => {
       .expect(400));
   it('rejects unauthenticated project updates', () =>
     request(app.getHttpServer()).patch('/api/v1/admin/projects/id').send({ order: 2 }).expect(401));
+
+  it('generates and echoes a request id, and the error envelope carries the same one', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/v1/admin/projects/id')
+      .send({ order: 2 })
+      .expect(401);
+    expect(res.headers['x-request-id']).toBeTruthy();
+    expect(res.body.error.requestId).toBe(res.headers['x-request-id']);
+  });
+
+  it('honors a well-formed caller-supplied request id instead of generating a new one', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/health')
+      .set('x-request-id', 'caller-supplied-abc-123')
+      .expect(200);
+    expect(res.headers['x-request-id']).toBe('caller-supplied-abc-123');
+  });
+
+  it('replaces an unsafe caller-supplied request id rather than reflecting it verbatim', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/health')
+      .set('x-request-id', 'has spaces and <tags>')
+      .expect(200);
+    expect(res.headers['x-request-id']).not.toBe('has spaces and <tags>');
+    expect(res.headers['x-request-id']).toBeTruthy();
+  });
 });
