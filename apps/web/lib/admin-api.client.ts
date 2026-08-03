@@ -609,6 +609,8 @@ export const messages = {
     }),
   remove: (id: string) =>
     apiFetch<{ deleted: true }>(`/admin/messages/${id}`, { method: 'DELETE' }),
+  retryNotification: (id: string) =>
+    apiFetch<AdminContactMessage>(`/admin/messages/${id}/retry-notification`, { method: 'POST' }),
 };
 
 export interface DashboardSummary {

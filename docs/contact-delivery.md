@@ -56,6 +56,35 @@ was already durably persisted in step one.
 The public API response is always the same generic success shape regardless of delivery outcome —
 delivery-provider details are never exposed to the caller.
 
+## Manual retry (Sprint 4)
+
+`POST /api/v1/admin/messages/:id/retry-notification` (authenticated, CSRF-protected like every
+other admin mutation) re-attempts delivery for a message whose most recent delivery attempt
+failed. Implementation: `ContactService.retryNotification` (`apps/api/src/contact/contact.service.ts`).
+
+- **Idempotent claim, not a queue**: `ContactMessage.retryClaimedAt` is set via a single atomic
+  conditional `UPDATE ... WHERE id = ? AND (retryClaimedAt IS NULL OR retryClaimedAt < cutoff)`.
+  The `updateMany` result count tells the caller whether it won the claim — there is no
+  read-then-write gap a second concurrent request could land in. A claim older than 2 minutes
+  (`RETRY_CLAIM_TTL_MS`) is treated as abandoned (the process crashed mid-attempt) and becomes
+  reclaimable. A reliable database-backed claim is sufficient for this single-administrator
+  portfolio — a distributed queue would be solving a problem that doesn't exist here.
+- **Bounded, not infinite**: a message that has accumulated `MAX_DELIVERY_ATTEMPTS` (5, counting
+  the original submit-time attempt) delivery-attempt rows refuses further retries with
+  `409 RETRY_LIMIT_REACHED` — a persistently broken SMTP configuration must surface as "stop and
+  investigate", not silently consume admin clicks forever.
+- **Claim held**: a retry already in flight (or a full send/release round trip so fast the second
+  request's claim attempt lands before the first releases it) gets `409 RETRY_IN_PROGRESS`.
+- Every attempt — success or failure — is recorded as a new `ContactDeliveryAttempt` row and an
+  `AuditLog` entry (`CONTACT_MESSAGE_NOTIFICATION_RETRIED`), and the claim is released
+  unconditionally afterward so a failed retry remains retryable.
+- The message body is never logged — only the outcome, same as the original submit-time delivery.
+- The CMS message list/detail view (`ContactRowActions.tsx`) shows a **RETRY NOTIFICATION** button
+  whenever the latest delivery attempt failed, behind the same keyboard-accessible
+  confirm-dialog pattern used for delete. The dashboard's existing `failedNotifications` count
+  (`apps/api/src/dashboard/dashboard.service.ts`) reflects retries automatically — no separate
+  counter to keep in sync.
+
 ## Configuration
 
 See the env var block in `docs/sprint-3.md`.

@@ -67,4 +67,9 @@ export class AdminContactController {
     await this.contact.remove(id, request.user?.sub);
     return { data: { deleted: true } };
   }
+  @Post(':id/retry-notification')
+  @HttpCode(200)
+  async retryNotification(@Param('id') id: string, @Req() request: AdminRequest) {
+    return { data: await this.contact.retryNotification(id, request.user?.sub) };
+  }
 }

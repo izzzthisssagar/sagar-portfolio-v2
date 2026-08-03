@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ContactStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ContactStatusInput, ListContactMessagesDto, SubmitContactDto } from './contact.dto';
@@ -18,6 +18,18 @@ const messageView = <T extends { status: ContactStatus }>(row: T) => ({
  * accidental double click, not a hard uniqueness constraint. */
 const DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const MAX_SEND_ATTEMPTS = 2;
+
+/** Total delivery attempts (the original submit-time attempt plus every manual retry) a single
+ * message may accumulate before the retry endpoint refuses further attempts — a persistent
+ * configuration failure (e.g. a dead SMTP relay) must surface as "stop and investigate", not loop
+ * forever eating admin clicks. See docs/contact-delivery.md. */
+const MAX_DELIVERY_ATTEMPTS = 5;
+
+/** How long a retry claim (ContactMessage.retryClaimedAt) is honored before it's treated as
+ * abandoned — e.g. the process crashed mid-attempt — and becomes reclaimable. Matches
+ * DUPLICATE_WINDOW_MS's order of magnitude; there's no real-world reason a single notification
+ * send should take anywhere near this long. */
+const RETRY_CLAIM_TTL_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class ContactService {
@@ -76,6 +88,76 @@ export class ContactService {
         ...(lastResult.reason ? { reason: lastResult.reason } : {}),
       },
     });
+  }
+
+  /**
+   * Admin-triggered retry for a message whose notification delivery previously failed.
+   *
+   * The claim (`retryClaimedAt`) is taken with a single atomic conditional `UPDATE ... WHERE id
+   * = ? AND (retryClaimedAt IS NULL OR retryClaimedAt < cutoff)` — `updateMany`'s result count
+   * tells us whether *this* call won the claim, with no read-then-write gap for a second
+   * concurrent request to land in. A message stuck claimed past RETRY_CLAIM_TTL_MS (the process
+   * that took the claim crashed mid-attempt) is treated as abandoned and reclaimable.
+   */
+  async retryNotification(id: string, actorId?: string) {
+    const existing = await this.prisma.contactMessage.findUnique({
+      where: { id },
+      include: { deliveryAttempts: true },
+    });
+    if (!existing) throw new NotFoundException('Message not found');
+
+    if (existing.deliveryAttempts.length >= MAX_DELIVERY_ATTEMPTS) {
+      throw new ConflictException({
+        code: 'RETRY_LIMIT_REACHED',
+        message:
+          `This message has reached the maximum of ${MAX_DELIVERY_ATTEMPTS} delivery attempts — ` +
+          'investigate the notification configuration rather than retrying again.',
+      });
+    }
+
+    const claimCutoff = new Date(Date.now() - RETRY_CLAIM_TTL_MS);
+    const claim = await this.prisma.contactMessage.updateMany({
+      where: { id, OR: [{ retryClaimedAt: null }, { retryClaimedAt: { lt: claimCutoff } }] },
+      data: { retryClaimedAt: new Date() },
+    });
+    if (claim.count === 0) {
+      throw new ConflictException({
+        code: 'RETRY_IN_PROGRESS',
+        message: 'A retry is already in progress for this message.',
+      });
+    }
+
+    const result = await this.notifier.send({
+      id: existing.id,
+      name: existing.name,
+      email: existing.email,
+      subject: existing.subject,
+      message: existing.message,
+    });
+
+    await this.prisma.$transaction([
+      this.prisma.contactDeliveryAttempt.create({
+        data: {
+          contactMessageId: id,
+          success: result.delivered,
+          ...(result.reason ? { reason: result.reason } : {}),
+        },
+      }),
+      // Clears the claim regardless of outcome — a failed retry must remain retryable (up to
+      // MAX_DELIVERY_ATTEMPTS), not get stuck permanently claimed.
+      this.prisma.contactMessage.update({ where: { id }, data: { retryClaimedAt: null } }),
+      this.prisma.auditLog.create({
+        data: {
+          action: 'CONTACT_MESSAGE_NOTIFICATION_RETRIED',
+          resource: 'ContactMessage',
+          resourceId: id,
+          ...(actorId ? { actorId } : {}),
+          metadata: { delivered: result.delivered },
+        },
+      }),
+    ]);
+
+    return this.get(id);
   }
 
   async list(query: ListContactMessagesDto) {

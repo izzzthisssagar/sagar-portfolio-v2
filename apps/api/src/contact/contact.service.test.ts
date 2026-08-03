@@ -12,11 +12,15 @@ const baseMessage = {
   consentAt: new Date(),
   createdAt: new Date(),
   ipHash: null,
+  retryClaimedAt: null,
+  deliveryAttempts: [] as { id: string; success: boolean }[],
 };
 
 function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {}) {
   const auditCreate = vi.fn().mockResolvedValue({});
   const deliveryCreate = vi.fn().mockResolvedValue({});
+  const messageUpdate = vi.fn().mockResolvedValue(baseMessage);
+  const messageUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const tx = {
     contactMessage: {
       update: vi.fn().mockResolvedValue({ ...baseMessage, status: 'READ' }),
@@ -31,8 +35,11 @@ function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {
       findUnique: vi.fn().mockResolvedValue(baseMessage),
       count: vi.fn().mockResolvedValue(1),
       create: vi.fn().mockResolvedValue(baseMessage),
+      update: messageUpdate,
+      updateMany: messageUpdateMany,
     },
     contactDeliveryAttempt: { create: deliveryCreate },
+    auditLog: { create: auditCreate },
     $transaction: vi.fn((value: unknown) =>
       typeof value === 'function'
         ? (value as (client: unknown) => unknown)(tx)
@@ -46,6 +53,8 @@ function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {
     tx,
     auditCreate,
     deliveryCreate,
+    messageUpdate,
+    messageUpdateMany,
     notifier,
   };
 }
@@ -138,5 +147,75 @@ describe('ContactService admin operations', () => {
     await service.remove('msg1', 'admin1');
     expect(tx.contactMessage.delete).toHaveBeenCalledWith({ where: { id: 'msg1' } });
     expect(auditCreate.mock.calls[0]![0].data.action).toBe('CONTACT_MESSAGE_DELETED');
+  });
+});
+
+describe('ContactService.retryNotification', () => {
+  it('throws 404 when the message does not exist', async () => {
+    const { service, prisma } = setup();
+    prisma.contactMessage.findUnique.mockResolvedValueOnce(null);
+    await expect(service.retryNotification('missing')).rejects.toThrow('Message not found');
+  });
+
+  it('refuses to retry once MAX_DELIVERY_ATTEMPTS is reached, without touching the claim or notifier', async () => {
+    const { service, prisma, notifier, messageUpdateMany } = setup();
+    prisma.contactMessage.findUnique.mockResolvedValueOnce({
+      ...baseMessage,
+      deliveryAttempts: Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, success: false })),
+    });
+    await expect(service.retryNotification('msg1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'RETRY_LIMIT_REACHED' }),
+    });
+    expect(messageUpdateMany).not.toHaveBeenCalled();
+    expect(notifier.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the atomic claim fails (a retry is already in progress)', async () => {
+    const { service, prisma, notifier, messageUpdateMany } = setup();
+    messageUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.retryNotification('msg1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'RETRY_IN_PROGRESS' }),
+    });
+    expect(notifier.send).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('on a successful claim, sends once, records the attempt, clears the claim, and audits — even on delivery failure', async () => {
+    const { service, prisma, notifier, deliveryCreate, messageUpdate, auditCreate } = setup({
+      send: vi.fn().mockResolvedValue({ delivered: false, reason: 'SMTP timeout' }),
+    });
+    await service.retryNotification('msg1', 'admin1');
+
+    expect(prisma.contactMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'msg1',
+          OR: [{ retryClaimedAt: null }, { retryClaimedAt: { lt: expect.any(Date) } }],
+        }),
+        data: { retryClaimedAt: expect.any(Date) },
+      }),
+    );
+    expect(notifier.send).toHaveBeenCalledTimes(1);
+    expect(deliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          contactMessageId: 'msg1',
+          success: false,
+          reason: 'SMTP timeout',
+        }),
+      }),
+    );
+    // The claim is always released, whether delivery succeeded or not — a failed retry must
+    // remain retryable up to MAX_DELIVERY_ATTEMPTS.
+    expect(messageUpdate).toHaveBeenCalledWith({
+      where: { id: 'msg1' },
+      data: { retryClaimedAt: null },
+    });
+    expect(auditCreate.mock.calls[0]![0].data).toMatchObject({
+      action: 'CONTACT_MESSAGE_NOTIFICATION_RETRIED',
+      resourceId: 'msg1',
+      actorId: 'admin1',
+      metadata: { delivered: false },
+    });
   });
 });
