@@ -112,6 +112,9 @@ importers:
       sharp:
         specifier: 0.35.0
         version: 0.35.0
+      zod:
+        specifier: 4.1.12
+        version: 4.1.12
     devDependencies:
       '@eslint/js':
         specifier: 9.39.1
