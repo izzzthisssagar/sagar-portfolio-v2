@@ -154,7 +154,25 @@ export class ProjectsService {
   }
 
   async update(id: string, input: UpdateProjectDto, actorId?: string) {
-    await this.getAdmin(id);
+    const current = await this.getAdmin(id);
+    // A published project must stay valid for publication after every
+    // edit, not just at the moment it was published — otherwise required
+    // content (overview, responsibilities/testStrategy, ...) could be
+    // cleared out from under a live page via a plain PATCH. Validate the
+    // merge of the stored record with the proposed change, the same way
+    // transitionStatus validates before publishing; an admin who genuinely
+    // wants to strip that content first sends the project back to draft.
+    const currentStatus: string = current.status;
+    if (currentStatus === 'published') {
+      const errors = validateForPublication({ ...current, ...input });
+      if (errors.length) {
+        throw new BadRequestException({
+          code: 'PUBLICATION_INVALID',
+          message: 'This update would leave the published project without required content.',
+          details: errors,
+        });
+      }
+    }
     try {
       const project = await this.prisma.$transaction(async (tx) => {
         const updated = await tx.project.update({ where: { id }, data: { ...input } });

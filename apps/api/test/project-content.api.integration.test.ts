@@ -132,6 +132,77 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
     ]);
   });
 
+  it('rejects a PATCH that would strip a published project of required publication content', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/projects')
+      .set(auth())
+      .send({
+        title: 'Published Content Guard Project',
+        slug: `${prefix}published-content-guard`,
+        summary: 'A published project used to confirm updates cannot break publication validity.',
+        overview: 'Full overview text.',
+        responsibilities: 'Led the QA effort end to end.',
+        order: 10,
+      })
+      .expect(201);
+    const id = created.body.data.id as string;
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${id}/workflow`)
+      .set(auth())
+      .send({ transition: 'publish' })
+      .expect(201);
+
+    // Clearing `overview` (required for publication) via a plain PATCH must
+    // be rejected while the project is still published.
+    const rejected = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/projects/${id}`)
+      .set(auth())
+      .send({ overview: '' })
+      .expect(400);
+    expect(rejected.body.error.code).toBe('PUBLICATION_INVALID');
+
+    // The stored record must be untouched — still published, still with its
+    // original overview.
+    const unchanged = await request(app.getHttpServer())
+      .get(`/api/v1/admin/projects/${id}`)
+      .set(auth())
+      .expect(200);
+    expect(unchanged.body.data.status).toBe('published');
+    expect(unchanged.body.data.overview).toBe('Full overview text.');
+
+    // Clearing both responsibilities and testStrategy — leaving neither of
+    // the two acceptable alternatives — must also be rejected.
+    const rejectedBoth = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/projects/${id}`)
+      .set(auth())
+      .send({ responsibilities: '', testStrategy: '' })
+      .expect(400);
+    expect(rejectedBoth.body.error.code).toBe('PUBLICATION_INVALID');
+
+    // A harmless edit that keeps the project publication-valid still goes
+    // through normally.
+    const allowed = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/projects/${id}`)
+      .set(auth())
+      .send({ summary: 'An updated, still-sufficiently-detailed summary.' })
+      .expect(200);
+    expect(allowed.body.data.summary).toBe('An updated, still-sufficiently-detailed summary.');
+
+    // Sending the project back to draft first, then clearing that same
+    // content, is allowed — the guard only applies while published.
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${id}/workflow`)
+      .set(auth())
+      .send({ transition: 'draft' })
+      .expect(201);
+    const clearedAsDraft = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/projects/${id}`)
+      .set(auth())
+      .send({ overview: '' })
+      .expect(200);
+    expect(clearedAsDraft.body.data.overview).toBe('');
+  });
+
   it('rejects status mutation through the generic PATCH endpoint', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/v1/admin/projects')
@@ -390,7 +461,7 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
     expect(await prisma.projectFinding.count({ where: { projectId } })).toBe(0);
   });
 
-  it('rejects a reorder payload that does not match the project child set', async () => {
+  it('rejects duplicate, omitted, and foreign reorder ids for both metrics and findings, with no partial updates', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/v1/admin/projects')
       .set(auth())
@@ -402,17 +473,103 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
       })
       .expect(201);
     const projectId = created.body.data.id as string;
-    await request(app.getHttpServer())
-      .post(`/api/v1/admin/projects/${projectId}/metrics`)
-      .set(auth())
-      .send({ label: 'Notes', value: '876+', evidence: 'confirmed', order: 0 })
-      .expect(201);
 
+    const metricIds: string[] = [];
+    for (const label of ['Metric A', 'Metric B', 'Metric C']) {
+      const metric = await request(app.getHttpServer())
+        .post(`/api/v1/admin/projects/${projectId}/metrics`)
+        .set(auth())
+        .send({ label, value: '1', evidence: 'confirmed', order: metricIds.length })
+        .expect(201);
+      metricIds.push(metric.body.data.id as string);
+    }
+    const [metricA, metricB, metricC] = metricIds;
+
+    const findingIds: string[] = [];
+    for (const title of ['Finding A', 'Finding B', 'Finding C']) {
+      const finding = await request(app.getHttpServer())
+        .post(`/api/v1/admin/projects/${projectId}/findings`)
+        .set(auth())
+        .send({
+          title,
+          summary: 'A finding used to exercise reorder id validation end to end.',
+          evidenceStatus: 'pending',
+          order: findingIds.length,
+        })
+        .expect(201);
+      findingIds.push(finding.body.data.id as string);
+    }
+    const [findingA, findingB, findingC] = findingIds;
+
+    const invalidMetricPayloads = [
+      { label: 'duplicate id masking an omission', orderedIds: [metricA, metricA, metricC] },
+      { label: 'omitted id', orderedIds: [metricA, metricB] },
+      { label: 'foreign id', orderedIds: [metricA, metricB, 'not-a-real-id'] },
+      { label: 'extra id beyond the owned set', orderedIds: [metricA, metricB, metricC, metricA] },
+    ];
+    for (const { orderedIds } of invalidMetricPayloads) {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/projects/${projectId}/metrics/reorder`)
+        .set(auth())
+        .send({ orderedIds })
+        .expect(400)
+        .expect(({ body }) => expect(body.error.code).toBe('REORDER_INVALID'));
+    }
+
+    const invalidFindingPayloads = [
+      { orderedIds: [findingA, findingA, findingC] },
+      { orderedIds: [findingA, findingB] },
+      { orderedIds: [findingA, findingB, 'not-a-real-id'] },
+    ];
+    for (const { orderedIds } of invalidFindingPayloads) {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/projects/${projectId}/findings/reorder`)
+        .set(auth())
+        .send({ orderedIds })
+        .expect(400)
+        .expect(({ body }) => expect(body.error.code).toBe('REORDER_INVALID'));
+    }
+
+    // None of the rejected payloads may have touched the stored order —
+    // every metric/finding must still report its original position.
+    const metricsAfter = await request(app.getHttpServer())
+      .get(`/api/v1/admin/projects/${projectId}/metrics`)
+      .set(auth())
+      .expect(200);
+    expect(
+      metricsAfter.body.data.map((m: { id: string; order: number }) => [m.id, m.order]),
+    ).toEqual([
+      [metricA, 0],
+      [metricB, 1],
+      [metricC, 2],
+    ]);
+    const findingsAfter = await request(app.getHttpServer())
+      .get(`/api/v1/admin/projects/${projectId}/findings`)
+      .set(auth())
+      .expect(200);
+    expect(
+      findingsAfter.body.data.map((f: { id: string; order: number }) => [f.id, f.order]),
+    ).toEqual([
+      [findingA, 0],
+      [findingB, 1],
+      [findingC, 2],
+    ]);
+
+    // A well-formed reorder (every owned id exactly once) still works.
     await request(app.getHttpServer())
       .patch(`/api/v1/admin/projects/${projectId}/metrics/reorder`)
       .set(auth())
-      .send({ orderedIds: ['not-a-real-id'] })
-      .expect(400);
+      .send({ orderedIds: [metricC, metricB, metricA] })
+      .expect(200);
+    const metricsReordered = await request(app.getHttpServer())
+      .get(`/api/v1/admin/projects/${projectId}/metrics`)
+      .set(auth())
+      .expect(200);
+    expect(metricsReordered.body.data.map((m: { id: string }) => m.id)).toEqual([
+      metricC,
+      metricB,
+      metricA,
+    ]);
   });
 
   it('reports live dashboard counts without inventing figures', async () => {

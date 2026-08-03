@@ -106,10 +106,20 @@ export class ProjectMetricsService {
       select: { id: true },
     });
     const validIds = new Set(rows.map((r) => r.id));
-    if (orderedIds.length !== rows.length || orderedIds.some((id) => !validIds.has(id))) {
+    const uniqueOrderedIds = new Set(orderedIds);
+    // Length-only comparisons let a duplicate mask an omission (e.g. project
+    // owns [A, B, C]; sending [A, A, C] has the right length and every id is
+    // owned, but B was silently dropped and A silently doubled up) — the
+    // uniqueness check is what actually enforces "every owned id exactly
+    // once."
+    const isValid =
+      orderedIds.length === rows.length &&
+      uniqueOrderedIds.size === orderedIds.length &&
+      orderedIds.every((id) => validIds.has(id));
+    if (!isValid) {
       throw new BadRequestException({
         code: 'REORDER_INVALID',
-        message: "orderedIds must contain exactly this project's metric ids.",
+        message: "orderedIds must contain each of this project's metric ids exactly once.",
       });
     }
     await this.prisma.$transaction([
