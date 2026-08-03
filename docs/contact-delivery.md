@@ -40,7 +40,7 @@ Adapters:
    attempt without contacting any real mail server (used by CI/Playwright to assert delivery
    bookkeeping without a live SMTP dependency).
 2. **SMTP** (`CONTACT_NOTIFICATION_DRIVER=smtp`) — configured only via `SMTP_HOST/_PORT/_SECURE/
-   _USERNAME/_PASSWORD/_FROM` and `CONTACT_NOTIFICATION_TO`. Production requires this driver with
+_USERNAME/_PASSWORD/_FROM` and `CONTACT_NOTIFICATION_TO`. Production requires this driver with
    full configuration; missing configuration fails closed (the API still accepts and stores the
    message — persistence never depends on delivery config — but the delivery attempt is recorded
    as a permanent failure with a clear `MISSING_CONFIGURATION` reason instead of retrying forever).

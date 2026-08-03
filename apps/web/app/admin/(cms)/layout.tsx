@@ -5,7 +5,16 @@ import { AdminTopBar } from '@/components/AdminTopBar';
 import { adminServer } from '@/lib/admin-api.server';
 import { verifyAdminAccessToken } from '@/lib/admin-auth.server';
 
-const links = ['dashboard', 'projects', 'posts', 'linkedin', 'game', 'media', 'messages', 'settings'];
+const links = [
+  'dashboard',
+  'projects',
+  'posts',
+  'linkedin',
+  'game',
+  'media',
+  'messages',
+  'settings',
+];
 export default async function AuthenticatedCmsLayout({ children }: { children: React.ReactNode }) {
   const session = (await cookies()).get('portfolio_access');
   const claims = await verifyAdminAccessToken(session?.value);

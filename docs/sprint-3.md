@@ -99,3 +99,15 @@ PUBLIC_SITE_URL=
   exercised against a real bucket or mail server (no credentials available in this environment);
   both fail closed when required configuration is absent, per the stop conditions in the sprint
   brief.
+- The full local Playwright suite occasionally hits the app-wide `ThrottlerGuard` budget (60
+  requests/60s per IP — `apps/api/src/app.module.ts`, predates Sprint 3): the suite's own necessary
+  request volume (dozens of page loads, each triggering several API calls) can exceed 60 within a
+  single 60-second window purely from running the suite, regardless of concurrency — confirmed by
+  direct reproduction (curling `/health` 70 times in a row starts returning 429 at request 61) and
+  by observing the same intermittent failure persist even pinned to a single Playwright worker
+  (`playwright.config.ts`, `workers: 1` — kept as a partial mitigation; it reduces burstiness even
+  though it doesn't eliminate the failure mode). The limit itself was deliberately left unchanged
+  rather than loosened, since it's a pre-existing security control from Sprint 1/2, not a Sprint 3
+  defect — raising or scoping it is a product decision for Sprint 4 (e.g. exempt read-only/health
+  routes from the global throttle, or raise the authenticated-admin budget). A CI run that trips
+  this should be re-run; it is not a sign of a broken feature.

@@ -47,6 +47,19 @@ export default defineConfig({
   globalSetup: databaseUrl ? './tests/e2e/global-setup.ts' : undefined,
   use: { baseURL: 'http://127.0.0.1:3000', trace: 'retain-on-failure' },
   webServer,
+  // Every DB-backed spec shares one Next.js dev server, one Nest dev server,
+  // one AdminUser row, and — this is the binding constraint — one app-wide
+  // ThrottlerGuard budget (60 requests/60s per IP, apps/api/src/app.module.ts,
+  // predates Sprint 3) that every request counts against together, since it's
+  // all from the same machine. The suite's own necessary volume can exceed 60
+  // within a single 60s window on its own — a tripped limit surfaces as an
+  // unrelated-looking UI timeout (a failed upload, a login that never
+  // resolves) rather than a visible 429. Pinning workers to 1 reduces
+  // burstiness and is kept as a partial mitigation, but does not fully
+  // eliminate the failure mode (see docs/sprint-3.md "Known limitations") —
+  // loosening the production rate limit to chase e2e determinism isn't a
+  // trade to make unilaterally here.
+  workers: 1,
 });
 
 export const jwtTestConfig = { accessSecret, accessIssuer, accessAudience };

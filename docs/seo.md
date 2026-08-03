@@ -10,14 +10,14 @@ Canonical URLs and metadata are generated from stored content plus one required 
 variable, `PUBLIC_SITE_URL` — never hardcoded or guessed from request headers. Production startup
 fails closed if `PUBLIC_SITE_URL` is unset (same fail-closed pattern as the media/contact adapters).
 
-| Page | Title/description source | Structured data |
-|---|---|---|
-| Homepage / About | `Profile` row (public `GET /profile`, excludes `email`) | `Person`, `WebSite` |
-| Work index | static copy | — |
-| Project page | derived from `Project.title`/`summary` (no `seoTitle` field was added — nothing in the stored record needed one beyond the title itself) | `CreativeWork` |
-| Notes index | static copy | — |
-| Field Note page | `BlogPost.seoTitle`, `seoDescription`, `canonicalUrl` | `Article` |
-| Contact | static copy | — |
+| Page             | Title/description source                                                                                                                 | Structured data     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| Homepage / About | `Profile` row (public `GET /profile`, excludes `email`)                                                                                  | `Person`, `WebSite` |
+| Work index       | static copy                                                                                                                              | —                   |
+| Project page     | derived from `Project.title`/`summary` (no `seoTitle` field was added — nothing in the stored record needed one beyond the title itself) | `CreativeWork`      |
+| Notes index      | static copy                                                                                                                              | —                   |
+| Field Note page  | `BlogPost.seoTitle`, `seoDescription`, `canonicalUrl`                                                                                    | `Article`           |
+| Contact          | static copy                                                                                                                              | —                   |
 
 Only factual, already-stored content feeds metadata and structured data — no invented ratings,
 employers, awards, or credentials. Draft/review/archived content is excluded from `sitemap.xml`

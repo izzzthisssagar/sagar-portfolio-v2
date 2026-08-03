@@ -3,16 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { hasDatabase } from '../../playwright.config';
 import { TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD } from './test-admin';
 
-const publicRoutes = [
-  '/',
-  '/work',
-  '/notes',
-  '/notes/testing-otp-beyond-happy-path',
-  '/about',
-  '/contact',
-  '/lab/qa-rift',
-  '/admin/login',
-];
+const publicRoutes = ['/', '/work', '/notes', '/about', '/contact', '/lab/qa-rift', '/admin/login'];
 test('all public routes return successfully', async ({ page }) => {
   for (const route of publicRoutes) {
     const response = await page.goto(route);
@@ -28,6 +19,28 @@ test('homepage navigation and serious axe gate', async ({ page }) => {
       ['critical', 'serious'].includes(violation.impact ?? ''),
     ),
   ).toEqual([]);
+});
+test('sitemap.xml lists published content and robots.txt disallows /admin', async ({
+  page,
+  request,
+}) => {
+  const sitemap = await request.get('/sitemap.xml');
+  expect(sitemap.ok()).toBe(true);
+  const sitemapBody = await sitemap.text();
+  expect(sitemapBody).toContain('<loc>http://127.0.0.1:3000/work/qa-mastery</loc>');
+  // Numazu Halal Food is seeded DRAFT (docs/sprint-3.md) — draft content must
+  // never appear in the sitemap, which is generated from the published-only
+  // public content endpoints (apps/web/app/sitemap.ts), not a raw table scan.
+  expect(sitemapBody).not.toContain('numazu-halal-food');
+
+  const robots = await request.get('/robots.txt');
+  expect(robots.ok()).toBe(true);
+  const robotsBody = await robots.text();
+  expect(robotsBody).toContain('Disallow: /admin');
+  expect(robotsBody).toContain('Sitemap:');
+
+  await page.goto('/admin/login');
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
 });
 test('mobile navigation is keyboard and touch operable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -85,6 +98,8 @@ test('QA Mastery is served from the seeded PostgreSQL record, not static fallbac
     'href',
     'https://qa-mastery-platform.vercel.app/',
   );
+  const ldJson = await page.locator('script[type="application/ld+json"]').first().textContent();
+  expect(JSON.parse(ldJson ?? '{}')).toMatchObject({ '@type': 'CreativeWork', name: 'QA Mastery' });
 });
 
 test('a live, database-backed session permits the CMS shell — a well-formed JWT alone is not enough', async ({

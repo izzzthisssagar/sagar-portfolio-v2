@@ -39,7 +39,9 @@ export async function submitContact(input: ContactSubmission): Promise<void> {
   const contentType = response.headers.get('content-type') ?? '';
   const payload = contentType.includes('application/json') ? await response.json() : null;
   if (!response.ok) {
-    const error = payload?.error as { code?: string; message?: string; details?: unknown } | undefined;
+    const error = payload?.error as
+      | { code?: string; message?: string; details?: unknown }
+      | undefined;
     throw new ContactSubmitError(
       response.status,
       error?.message ?? 'Could not send your message. Try again.',

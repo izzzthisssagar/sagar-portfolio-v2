@@ -76,9 +76,7 @@ export default async function MessagesPage({
                       </span>
                     </td>
                     <td>{new Date(message.createdAt).toLocaleDateString()}</td>
-                    <td>
-                      {lastAttempt ? (lastAttempt.success ? 'delivered' : 'failed') : '—'}
-                    </td>
+                    <td>{lastAttempt ? (lastAttempt.success ? 'delivered' : 'failed') : '—'}</td>
                     <td>
                       <ContactRowActions message={message} />
                     </td>

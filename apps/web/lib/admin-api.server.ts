@@ -64,6 +64,7 @@ export const adminServer = {
   listCv: (): Promise<AdminCvDocument[] | null> => adminFetch('/admin/cv'),
   listMessages: (qs = ''): Promise<ContactMessageListResult | null> =>
     adminFetchRaw(`/admin/messages${qs}`) as Promise<ContactMessageListResult | null>,
-  getMessage: (id: string): Promise<AdminContactMessage | null> => adminFetch(`/admin/messages/${id}`),
+  getMessage: (id: string): Promise<AdminContactMessage | null> =>
+    adminFetch(`/admin/messages/${id}`),
   dashboard: (): Promise<DashboardSummary | null> => adminFetch('/admin/dashboard'),
 };

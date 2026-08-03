@@ -38,6 +38,11 @@ jobs:
       # API_URL there would make every cookie-authenticated mutation in
       # those specs fail Host validation.
       NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+      # Required in production (apps/web/lib/seo.ts fails closed at build time
+      # when unset, deliberately — see docs/seo.md) for metadata/JSON-LD/
+      # sitemap/robots absolute-URL generation. `pnpm build` runs Next.js in
+      # production mode, so this must be set at job scope, not just per-step.
+      PUBLIC_SITE_URL: http://127.0.0.1:3000
       ADMIN_EMAIL: ci-admin@example.invalid
       ADMIN_PASSWORD: Ci-Only-Test-Admin-Password-9!
       # Explicit and off — CI must fail visibly on a broken API/content

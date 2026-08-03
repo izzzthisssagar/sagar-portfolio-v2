@@ -598,14 +598,17 @@ export interface ContactMessageListQuery {
 
 export const messages = {
   list: (query: ContactMessageListQuery = {}) =>
-    apiFetchRaw(`/admin/messages${toQueryString({ ...query })}`) as Promise<ContactMessageListResult>,
+    apiFetchRaw(
+      `/admin/messages${toQueryString({ ...query })}`,
+    ) as Promise<ContactMessageListResult>,
   get: (id: string) => apiFetch<AdminContactMessage>(`/admin/messages/${id}`),
   updateStatus: (id: string, status: AdminContactMessage['status']) =>
     apiFetch<AdminContactMessage>(`/admin/messages/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
-  remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/messages/${id}`, { method: 'DELETE' }),
+  remove: (id: string) =>
+    apiFetch<{ deleted: true }>(`/admin/messages/${id}`, { method: 'DELETE' }),
 };
 
 export interface DashboardSummary {
@@ -616,6 +619,12 @@ export interface DashboardSummary {
   activeSessions: number;
   unreadMessages: number;
   pendingMedia: number;
+  rejectedMedia: number;
+  publishedPosts: number;
+  draftPosts: number;
+  failedNotifications: number;
+  activeCvConfigured: boolean;
+  activePortraitConfigured: boolean;
   recentAuditEvents: { id: string; action: string; createdAt: string; resource?: string | null }[];
   lastSuccessfulLoginAt: string | null;
   recentFailedLogins24h: number;

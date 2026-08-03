@@ -144,10 +144,7 @@ databaseSuite('Media pipeline: upload, validation, quarantine, approval', () => 
     const etag = first.headers.etag as string;
     expect(etag).toBeTruthy();
 
-    await request(server())
-      .get(`/api/v1/media/${id}/file`)
-      .set('If-None-Match', etag)
-      .expect(304);
+    await request(server()).get(`/api/v1/media/${id}/file`).set('If-None-Match', etag).expect(304);
   });
 
   it('short-circuits a duplicate upload by checksum instead of creating a second row', async () => {

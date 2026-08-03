@@ -9,15 +9,15 @@ Sprint 3 added `canonicalUrl` and `displayOrder`, and turned `featuredImageId`/`
 real (optional) relations to `MediaAsset` so the database enforces referential integrity instead of
 trusting an unchecked string id.
 
-| Field | Notes |
-|---|---|
-| `title`, `slug` (unique), `excerpt`, `body` | `body` is Markdown text, never raw HTML — see "Safe rendering" below. |
-| `status` | `PublicationStatus`: `DRAFT`, `REVIEW`, `PUBLISHED`, `ARCHIVED`. |
-| `tags` | Relational (`BlogTag`, many-to-many), kept from the pre-existing schema rather than flattened to a string array — lets tag pages/filtering reuse one canonical tag row instead of free text drifting across posts. |
-| `featuredImageId` → `MediaAsset?` | Optional; enforced `APPROVED` at publish time (`publication-rules.ts`), not at the DB level (an admin may attach a still-`QUARANTINED` image while drafting). |
+| Field                                        | Notes                                                                                                                                                                                                                   |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`, `slug` (unique), `excerpt`, `body`  | `body` is Markdown text, never raw HTML — see "Safe rendering" below.                                                                                                                                                   |
+| `status`                                     | `PublicationStatus`: `DRAFT`, `REVIEW`, `PUBLISHED`, `ARCHIVED`.                                                                                                                                                        |
+| `tags`                                       | Relational (`BlogTag`, many-to-many), kept from the pre-existing schema rather than flattened to a string array — lets tag pages/filtering reuse one canonical tag row instead of free text drifting across posts.      |
+| `featuredImageId` → `MediaAsset?`            | Optional; enforced `APPROVED` at publish time (`publication-rules.ts`), not at the DB level (an admin may attach a still-`QUARANTINED` image while drafting).                                                           |
 | `seoTitle`, `seoDescription`, `canonicalUrl` | SEO metadata fields (spec's `metaTitle`/`metaDescription` — kept the existing `seoTitle`/`seoDescription` names already used by the pre-existing schema and `docs/seo.md` conventions rather than introduce a synonym). |
-| `publishedAt` | Set once, on the `publish` transition; untouched by later edits or by `draft`/`archive` transitions (an article's original publish date doesn't move if it's later revised or archived). |
-| `displayOrder` | New; manual ordering for admin list / homepage teaser, mirrors `Project.order`. |
+| `publishedAt`                                | Set once, on the `publish` transition; untouched by later edits or by `draft`/`archive` transitions (an article's original publish date doesn't move if it's later revised or archived).                                |
+| `displayOrder`                               | New; manual ordering for admin list / homepage teaser, mirrors `Project.order`.                                                                                                                                         |
 
 ## Publication statuses and workflow
 

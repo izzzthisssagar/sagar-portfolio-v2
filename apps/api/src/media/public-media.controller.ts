@@ -19,11 +19,7 @@ import { MediaService } from './media.service';
 export class PublicMediaController {
   constructor(private readonly media: MediaService) {}
 
-  @Get(':id/file') async file(
-    @Param('id') id: string,
-    @Req() req: Request,
-    @Res() res: Response,
-  ) {
+  @Get(':id/file') async file(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const result = await this.media.getApprovedFile(id);
     if (!result) throw new NotFoundException('Media not found.');
     const { buffer, mimeType, filename, sha256 } = result;

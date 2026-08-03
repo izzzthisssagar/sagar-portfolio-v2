@@ -43,15 +43,19 @@ export function ContactForm() {
       setValues(emptyContactFormValues);
     } catch (error) {
       setStatus('error');
-      setServerError(error instanceof ContactSubmitError ? error.message : 'Could not send your message. Try again.');
+      setServerError(
+        error instanceof ContactSubmitError
+          ? error.message
+          : 'Could not send your message. Try again.',
+      );
     }
   }
 
   if (status === 'success') {
     return (
       <p role="status" className="contact-success">
-        Message received. I read every message and reply from my own inbox — there is no
-        auto-reply, so expect a personal response.
+        Message received. I read every message and reply from my own inbox — there is no auto-reply,
+        so expect a personal response.
       </p>
     );
   }
@@ -151,7 +155,12 @@ export function ContactForm() {
           onChange={(event) => set('website', event.target.value)}
         />
       </div>
-      <button className="button primary" type="submit" disabled={status === 'submitting'} aria-busy={status === 'submitting'}>
+      <button
+        className="button primary"
+        type="submit"
+        disabled={status === 'submitting'}
+        aria-busy={status === 'submitting'}
+      >
         {status === 'submitting' ? 'SENDING…' : 'SEND'}
       </button>
     </form>
