@@ -21,7 +21,53 @@ function readCsrfToken(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
-async function apiFetchRaw(path: string, init: RequestInit = {}): Promise<unknown> {
+/** Endpoints that must never trigger a refresh-and-retry themselves — retrying
+ * a failed login/refresh/logout as if it were an expired session would either
+ * loop or mask a real credential error as a session hiccup. */
+const NO_REFRESH_RETRY_PATHS = new Set([
+  '/auth/login',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/logout-all',
+]);
+
+/** Single in-flight refresh promise shared across all callers so that several
+ * requests failing with an expired access token at once trigger exactly one
+ * `/auth/refresh` call, not one per request. */
+let refreshPromise: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  refreshPromise ??= (async () => {
+    try {
+      const headers = new Headers();
+      const csrf = readCsrfToken();
+      if (csrf) headers.set('X-CSRF-Token', csrf);
+      const response = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
+}
+
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+  const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
+  window.location.assign(`/admin/login?returnTo=${returnTo}`);
+}
+
+async function apiFetchRaw(
+  path: string,
+  init: RequestInit = {},
+  isRetry = false,
+): Promise<unknown> {
   const method = (init.method ?? 'GET').toUpperCase();
   const headers = new Headers(init.headers);
   if (!SAFE_METHODS.has(method)) {
@@ -36,6 +82,13 @@ async function apiFetchRaw(path: string, init: RequestInit = {}): Promise<unknow
     headers,
     credentials: 'include',
   });
+
+  if (response.status === 401 && !isRetry && !NO_REFRESH_RETRY_PATHS.has(path)) {
+    const refreshed = await refreshSession();
+    if (refreshed) return apiFetchRaw(path, init, true);
+    redirectToLogin();
+  }
+
   const contentType = response.headers.get('content-type') ?? '';
   const payload = contentType.includes('application/json') ? await response.json() : null;
 
@@ -186,7 +239,10 @@ export const projects = {
   list: (query: ProjectListQuery = {}) =>
     apiFetchRaw(`/admin/projects${toQueryString({ ...query })}`) as Promise<ProjectListResult>,
   get: (id: string) => apiFetch<AdminProject>(`/admin/projects/${id}`),
-  create: (input: ProjectInput & { status: AdminProject['status'] }) =>
+  /** Every new project is created as `draft` by the API regardless of what's
+   * sent — publication only ever happens through `transition('publish')`,
+   * which runs publish validation. There is no `status` input here. */
+  create: (input: ProjectInput) =>
     apiFetch<AdminProject>('/admin/projects', { method: 'POST', body: JSON.stringify(input) }),
   update: (id: string, input: Partial<ProjectInput>) =>
     apiFetch<AdminProject>(`/admin/projects/${id}`, {
