@@ -304,6 +304,69 @@ export const projects = {
   },
 };
 
+export interface AdminPost {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  body: string;
+  status: 'draft' | 'review' | 'published' | 'archived';
+  publishedAt?: string | null;
+  seoTitle: string;
+  seoDescription: string;
+  canonicalUrl?: string | null;
+  displayOrder: number;
+  featuredImageId?: string | null;
+  featuredImage?: { id: string; altText: string | null; status: string } | null;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostInput {
+  title: string;
+  slug: string;
+  excerpt?: string;
+  body?: string;
+  tags?: string[];
+  featuredImageId?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  canonicalUrl?: string;
+  displayOrder?: number;
+}
+
+export interface PostListResult {
+  data: AdminPost[];
+  meta: { page: number; limit: number; total: number };
+}
+
+export interface PostListQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: AdminPost['status'];
+  tag?: string;
+}
+
+export const posts = {
+  list: (query: PostListQuery = {}) =>
+    apiFetchRaw(`/admin/posts${toQueryString({ ...query })}`) as Promise<PostListResult>,
+  get: (id: string) => apiFetch<AdminPost>(`/admin/posts/${id}`),
+  /** Every new post is created as `draft` regardless of what's sent — publication only ever
+   * happens through `transition('publish')`, which runs publish validation. */
+  create: (input: PostInput) =>
+    apiFetch<AdminPost>('/admin/posts', { method: 'POST', body: JSON.stringify(input) }),
+  update: (id: string, input: Partial<PostInput>) =>
+    apiFetch<AdminPost>(`/admin/posts/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  transition: (id: string, transition: 'draft' | 'review' | 'publish' | 'archive') =>
+    apiFetch<AdminPost>(`/admin/posts/${id}/workflow`, {
+      method: 'POST',
+      body: JSON.stringify({ transition }),
+    }),
+  remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/posts/${id}`, { method: 'DELETE' }),
+};
+
 export interface DashboardSummary {
   totalProjects: number;
   projectsByStatus: Record<string, number>;

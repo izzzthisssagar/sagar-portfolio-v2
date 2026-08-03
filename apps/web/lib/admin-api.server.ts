@@ -3,9 +3,11 @@ import { cookies } from 'next/headers';
 import type {
   AdminFinding,
   AdminMetric,
+  AdminPost,
   AdminProject,
   AdminSession,
   DashboardSummary,
+  PostListResult,
   ProjectListResult,
 } from './admin-api.client';
 
@@ -42,5 +44,8 @@ export const adminServer = {
     adminFetch(`/admin/projects/${projectId}/metrics`),
   listFindings: (projectId: string): Promise<AdminFinding[] | null> =>
     adminFetch(`/admin/projects/${projectId}/findings`),
+  listPosts: (qs = ''): Promise<PostListResult | null> =>
+    adminFetchRaw(`/admin/posts${qs}`) as Promise<PostListResult | null>,
+  getPost: (id: string): Promise<AdminPost | null> => adminFetch(`/admin/posts/${id}`),
   dashboard: (): Promise<DashboardSummary | null> => adminFetch('/admin/dashboard'),
 };

@@ -593,6 +593,37 @@ input {
   text-transform: uppercase;
   font-size: 0.78rem;
 }
+.markdown-preview {
+  border: 1px solid var(--line);
+  padding: 1.5rem;
+  min-height: 12rem;
+}
+.markdown-preview :is(h2, h3, h4) {
+  margin-top: 0;
+}
+.markdown-preview a {
+  color: var(--orange);
+}
+.markdown-preview img {
+  max-width: 100%;
+  height: auto;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  list-style: none;
+  margin: 1rem 0;
+}
+.tag-list li {
+  border: 1px solid var(--muted);
+  color: var(--paper-2);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
