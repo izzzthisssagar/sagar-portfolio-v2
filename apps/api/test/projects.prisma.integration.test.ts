@@ -23,10 +23,10 @@ databaseSuite('Projects Prisma integration', () => {
       title: 'Integration Project',
       slug,
       summary: 'A database-backed integration project contract.',
-      status: 'draft',
       order: 999,
     });
     id = created.id;
+    expect(created.status).toBe('draft');
     expect(
       (
         await service.listAdmin({

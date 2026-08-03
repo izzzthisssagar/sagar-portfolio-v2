@@ -67,7 +67,6 @@ export function ProjectForm({
   const router = useRouter();
   const [values, setValues] = useState<ProjectFormValues>(() => toFormValues(project));
   const [slugTouched, setSlugTouched] = useState(mode === 'edit');
-  const [status, setStatus] = useState<AdminProject['status']>(project?.status ?? 'draft');
   const [errors, setErrors] = useState<ProjectFormErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -135,7 +134,7 @@ export function ProjectForm({
     };
     try {
       if (mode === 'create') {
-        const created = await projects.create({ ...payload, status });
+        const created = await projects.create(payload);
         setDirty(false);
         router.push(`/admin/projects/${created.id}`);
       } else if (project) {
@@ -185,17 +184,10 @@ export function ProjectForm({
         </p>
       )}
       {mode === 'create' && (
-        <div className="field">
-          <label htmlFor="field-status">Initial status</label>
-          <select
-            id="field-status"
-            value={status}
-            onChange={(event) => setStatus(event.target.value as AdminProject['status'])}
-          >
-            <option value="draft">Draft</option>
-            <option value="review">In review</option>
-          </select>
-        </div>
+        <p className="project-status-note">
+          New projects are always created as <strong>draft</strong>. Use the project list actions to
+          move a project to review or publish it once it&apos;s ready.
+        </p>
       )}
 
       <div className="field">

@@ -99,7 +99,12 @@ export class ProjectsService {
     const project = await this.prisma.project.findFirst({
       where: { slug, status: PublicationStatus.PUBLISHED },
       include: {
-        metrics: { orderBy: { order: 'asc' } },
+        // Public readers only ever see metrics with confirmed evidence — a
+        // pending or unavailable metric must never read as a settled fact.
+        // Findings stay unfiltered because their evidence status is
+        // rendered alongside them (never presented as a bare confirmed
+        // claim); the admin API and draft preview return every metric.
+        metrics: { where: { evidence: EvidenceStatus.CONFIRMED }, orderBy: { order: 'asc' } },
         findings: { orderBy: { order: 'asc' } },
       },
     });
@@ -122,8 +127,13 @@ export class ProjectsService {
   async create(input: CreateProjectDto, actorId?: string) {
     try {
       const project = await this.prisma.$transaction(async (tx) => {
+        // Every project is created as DRAFT regardless of what the client
+        // sends — CreateProjectDto has no `status` field, so this is the
+        // only place publication status can be set on create. Publishing
+        // happens exclusively through transitionStatus (the workflow
+        // endpoint), which runs validateForPublication first.
         const created = await tx.project.create({
-          data: { ...input, status: statusToDb(input.status) },
+          data: { ...input, status: PublicationStatus.DRAFT },
         });
         await tx.auditLog.create({
           data: {

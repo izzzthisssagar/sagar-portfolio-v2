@@ -37,7 +37,7 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
       },
     });
     adminToken = new JwtService().sign(
-      { sub: admin.id, role: 'admin' },
+      { sub: admin.id, role: 'admin', tokenVersion: admin.tokenVersion },
       {
         secret: accessSecret,
         issuer: accessIssuer,
@@ -64,7 +64,6 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
         title: 'Incomplete Project',
         slug: `${prefix}incomplete`,
         summary: 'A project missing overview and responsibilities/test strategy content.',
-        status: 'draft',
         order: 1,
       })
       .expect(201);
@@ -89,7 +88,6 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
         summary: 'A sufficiently detailed summary of the publishable project.',
         overview: 'Full overview text.',
         responsibilities: 'Led the QA effort end to end.',
-        status: 'draft',
         order: 2,
       })
       .expect(201);
@@ -142,7 +140,6 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
         title: 'Patch Guard Project',
         slug: `${prefix}patch-guard`,
         summary: 'A project used to confirm status cannot be patched directly.',
-        status: 'draft',
         order: 3,
       })
       .expect(201);
@@ -153,6 +150,74 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
       .expect(400);
   });
 
+  it('rejects a create request that supplies a publication status', async () => {
+    const rejected = await request(app.getHttpServer())
+      .post('/api/v1/admin/projects')
+      .set(auth())
+      .send({
+        title: 'Status Injection Project',
+        slug: `${prefix}status-injection`,
+        summary: 'A create request that tries to set status directly instead of DRAFT.',
+        status: 'published',
+        order: 7,
+      })
+      .expect(400);
+    expect(JSON.stringify(rejected.body.error.message)).toMatch(/status/i);
+  });
+
+  it('rejects a create request that tries to set publishedAt directly', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/projects')
+      .set(auth())
+      .send({
+        title: 'PublishedAt Injection Project',
+        slug: `${prefix}publishedat-injection`,
+        summary: 'A create request that tries to backdate publishedAt directly.',
+        publishedAt: '2020-01-01T00:00:00.000Z',
+        order: 7,
+      })
+      .expect(400);
+  });
+
+  it('always creates a project as draft, even when the payload is publish-ready, and only sets publishedAt through the workflow endpoint', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/projects')
+      .set(auth())
+      .send({
+        title: 'Publish-Ready On Create Project',
+        slug: `${prefix}publish-ready-on-create`,
+        summary: 'A fully publish-ready payload submitted straight to the create endpoint.',
+        overview: 'Full overview text.',
+        responsibilities: 'Led the QA effort end to end.',
+        order: 8,
+      })
+      .expect(201);
+    expect(created.body.data.status).toBe('draft');
+    expect(created.body.data.publishedAt).toBeFalsy();
+
+    // Not publicly visible until it actually goes through the workflow
+    // endpoint's own publish validation.
+    await request(app.getHttpServer())
+      .get(`/api/v1/projects/${prefix}publish-ready-on-create`)
+      .expect(404);
+
+    const published = await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${created.body.data.id}/workflow`)
+      .set(auth())
+      .send({ transition: 'publish' })
+      .expect(201);
+    expect(published.body.data.status).toBe('published');
+    expect(published.body.data.publishedAt).toBeTruthy();
+
+    const auditActions = (
+      await prisma.auditLog.findMany({
+        where: { resourceId: created.body.data.id },
+        orderBy: { createdAt: 'asc' },
+      })
+    ).map((row) => row.action);
+    expect(auditActions).toEqual(['PROJECT_CREATED', 'PROJECT_PUBLISHED']);
+  });
+
   it('creates, reorders, and deletes metrics with audit events', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/v1/admin/projects')
@@ -161,7 +226,6 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
         title: 'Metrics Project',
         slug: `${prefix}metrics`,
         summary: 'A project used to exercise the metrics vertical end to end.',
-        status: 'draft',
         order: 4,
       })
       .expect(201);
@@ -214,6 +278,78 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
     expect(auditActions).toContain('METRIC_DELETED');
   });
 
+  it('exposes only confirmed metrics publicly, while admin and preview keep every evidence state', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/projects')
+      .set(auth())
+      .send({
+        title: 'Evidence Visibility Project',
+        slug: `${prefix}evidence-visibility`,
+        summary: 'A project used to verify public metrics are filtered by evidence status.',
+        overview: 'Full overview text.',
+        responsibilities: 'Led the QA effort end to end.',
+        order: 9,
+      })
+      .expect(201);
+    const projectId = created.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${projectId}/metrics`)
+      .set(auth())
+      .send({ label: 'Confirmed metric', value: '48', evidence: 'confirmed', order: 0 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${projectId}/metrics`)
+      .set(auth())
+      .send({ label: 'Pending metric', value: '13', evidence: 'pending', order: 1 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${projectId}/metrics`)
+      .set(auth())
+      .send({ label: 'Unavailable metric', value: '3', evidence: 'unavailable', order: 2 })
+      .expect(201);
+
+    // Admin API always returns every evidence state, published or not.
+    const adminView = await request(app.getHttpServer())
+      .get(`/api/v1/admin/projects/${projectId}`)
+      .set(auth())
+      .expect(200);
+    expect(adminView.body.data.metrics.map((m: { evidence: string }) => m.evidence).sort()).toEqual(
+      ['confirmed', 'pending', 'unavailable'],
+    );
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/admin/projects/${projectId}/workflow`)
+      .set(auth())
+      .send({ transition: 'publish' })
+      .expect(201);
+
+    const publicView = await request(app.getHttpServer())
+      .get(`/api/v1/projects/${prefix}evidence-visibility`)
+      .expect(200);
+    expect(publicView.body.data.metrics).toHaveLength(1);
+    expect(publicView.body.data.metrics[0]).toMatchObject({
+      label: 'Confirmed metric',
+      evidence: 'confirmed',
+    });
+    expect(
+      publicView.body.data.metrics.some((m: { evidence: string }) => m.evidence === 'pending'),
+    ).toBe(false);
+    expect(
+      publicView.body.data.metrics.some((m: { evidence: string }) => m.evidence === 'unavailable'),
+    ).toBe(false);
+
+    // Publishing must not silently change any metric's evidence status —
+    // the admin view should still show the same three states afterward.
+    const adminAfterPublish = await request(app.getHttpServer())
+      .get(`/api/v1/admin/projects/${projectId}`)
+      .set(auth())
+      .expect(200);
+    expect(
+      adminAfterPublish.body.data.metrics.map((m: { evidence: string }) => m.evidence).sort(),
+    ).toEqual(['confirmed', 'pending', 'unavailable']);
+  });
+
   it('creates, updates, and deletes findings, keeping pending evidence distinguishable', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/v1/admin/projects')
@@ -222,7 +358,6 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
         title: 'Findings Project',
         slug: `${prefix}findings`,
         summary: 'A project used to exercise the findings vertical end to end.',
-        status: 'draft',
         order: 5,
       })
       .expect(201);
@@ -263,7 +398,6 @@ databaseSuite('Project content vertical: workflow, metrics, findings, dashboard'
         title: 'Reorder Guard Project',
         slug: `${prefix}reorder-guard`,
         summary: 'A project used to confirm reorder payloads are validated strictly.',
-        status: 'draft',
         order: 6,
       })
       .expect(201);

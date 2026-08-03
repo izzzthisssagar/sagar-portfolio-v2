@@ -1,4 +1,4 @@
-import { OmitType, PartialType } from '@nestjs/mapped-types';
+import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -45,14 +45,16 @@ export class CreateProjectDto {
   @IsOptional() @IsUrl({ protocols: ['https', 'http'] }) @MaxLength(500) githubUrl?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) labels?: string[];
   @IsOptional() @IsIn(SCENE_STATES) sceneState?: (typeof SCENE_STATES)[number];
-  @IsIn(PROJECT_STATUSES) status!: (typeof PROJECT_STATUSES)[number];
   @IsInt() @Min(0) @Max(10_000) order!: number;
 }
 
-/** Status is intentionally excluded — only the workflow endpoint may transition it. */
-export class UpdateProjectDto extends PartialType(
-  OmitType(CreateProjectDto, ['status'] as const),
-) {}
+/** Publication status is intentionally absent from both the create and
+ * update shapes — every project is created as DRAFT (`ProjectsService.create`
+ * hardcodes it) and can only move through review/publish/archive via the
+ * dedicated `POST /admin/projects/:id/workflow` endpoint, which runs
+ * publish validation. Accepting `status` here would let a client mint a
+ * published project directly, bypassing that validation. */
+export class UpdateProjectDto extends PartialType(CreateProjectDto) {}
 
 export class ProjectWorkflowDto {
   @IsIn(WORKFLOW_TRANSITIONS) transition!: WorkflowTransition;
