@@ -565,6 +565,49 @@ export const cv = {
   remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/cv/${id}`, { method: 'DELETE' }),
 };
 
+export interface AdminContactDeliveryAttempt {
+  id: string;
+  success: boolean;
+  reason?: string | null;
+  createdAt: string;
+}
+
+export interface AdminContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  subject?: string | null;
+  company?: string | null;
+  message: string;
+  status: 'new' | 'read' | 'replied' | 'archived' | 'spam';
+  createdAt: string;
+  deliveryAttempts?: AdminContactDeliveryAttempt[];
+}
+
+export interface ContactMessageListResult {
+  data: AdminContactMessage[];
+  meta: { page: number; limit: number; total: number };
+}
+
+export interface ContactMessageListQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: AdminContactMessage['status'];
+}
+
+export const messages = {
+  list: (query: ContactMessageListQuery = {}) =>
+    apiFetchRaw(`/admin/messages${toQueryString({ ...query })}`) as Promise<ContactMessageListResult>,
+  get: (id: string) => apiFetch<AdminContactMessage>(`/admin/messages/${id}`),
+  updateStatus: (id: string, status: AdminContactMessage['status']) =>
+    apiFetch<AdminContactMessage>(`/admin/messages/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  remove: (id: string) => apiFetch<{ deleted: true }>(`/admin/messages/${id}`, { method: 'DELETE' }),
+};
+
 export interface DashboardSummary {
   totalProjects: number;
   projectsByStatus: Record<string, number>;

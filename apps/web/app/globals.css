@@ -376,6 +376,13 @@ input {
 .login-feedback:empty {
   visibility: hidden;
 }
+.contact-success {
+  border: 1px solid var(--green);
+  color: var(--paper);
+  max-width: 420px;
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
 .login .button {
   width: 100%;
   justify-content: center;
@@ -729,6 +736,12 @@ input {
 }
 .media-detail-facts dd {
   margin: 0.2rem 0 0;
+}
+.contact-message-body {
+  white-space: pre-wrap;
+  border: 1px solid var(--line);
+  padding: 1.5rem;
+  max-width: 640px;
 }
 .media-detail-actions {
   display: flex;

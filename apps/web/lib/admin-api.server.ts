@@ -1,6 +1,7 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import type {
+  AdminContactMessage,
   AdminCvDocument,
   AdminFinding,
   AdminMedia,
@@ -9,6 +10,7 @@ import type {
   AdminProfile,
   AdminProject,
   AdminSession,
+  ContactMessageListResult,
   DashboardSummary,
   MediaListResult,
   PostListResult,
@@ -60,5 +62,8 @@ export const adminServer = {
   getMedia: (id: string): Promise<AdminMedia | null> => adminFetch(`/admin/media/${id}`),
   getProfile: (): Promise<AdminProfile | null> => adminFetch('/admin/profile'),
   listCv: (): Promise<AdminCvDocument[] | null> => adminFetch('/admin/cv'),
+  listMessages: (qs = ''): Promise<ContactMessageListResult | null> =>
+    adminFetchRaw(`/admin/messages${qs}`) as Promise<ContactMessageListResult | null>,
+  getMessage: (id: string): Promise<AdminContactMessage | null> => adminFetch(`/admin/messages/${id}`),
   dashboard: (): Promise<DashboardSummary | null> => adminFetch('/admin/dashboard'),
 };
