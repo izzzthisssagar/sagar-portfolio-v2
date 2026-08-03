@@ -6,6 +6,7 @@ import {
   Get,
   HttpException,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { resolveRequestId } from './logging/request-id';
 import type { StructuredLogger } from './logging/structured-logger';
@@ -27,10 +28,17 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
     const requestId = request.id ?? resolveRequestId(undefined);
     const raw =
       exception instanceof HttpException ? exception.getResponse() : 'Internal server error';
+    // 429's default message from @nestjs/throttler is literally "ThrottlerException: Too Many
+    // Requests" — the library's own exception class name leaking into a public message. The
+    // Retry-After header (set by ThrottlerGuard itself) already carries the actual retry
+    // guidance; the message only needs to say what happened, not name the internal class that
+    // detected it.
     const message =
-      typeof raw === 'string'
-        ? raw
-        : ((raw as { message?: string | string[] }).message ?? 'Request failed');
+      status === 429
+        ? 'Too many requests. Please try again later.'
+        : typeof raw === 'string'
+          ? raw
+          : ((raw as { message?: string | string[] }).message ?? 'Request failed');
     const code =
       typeof raw === 'object' &&
       raw !== null &&
@@ -61,6 +69,7 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
   }
 }
 @Controller()
+@SkipThrottle()
 export class HealthController {
   @Get('health') health() {
     return { status: 'ok', service: 'portfolio-api', version: 'v1' };

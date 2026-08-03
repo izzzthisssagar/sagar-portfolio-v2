@@ -55,6 +55,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(200)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @UseGuards(CsrfGuard)
   async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
     const raw = request.cookies?.[REFRESH_TOKEN_COOKIE] as string | undefined;

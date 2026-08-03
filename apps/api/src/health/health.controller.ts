@@ -1,5 +1,6 @@
 import { Controller, Get, Headers, NotFoundException, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { getConfig } from '../config';
 import { HealthService } from './health.service';
@@ -9,9 +10,14 @@ import { HealthService } from './health.service';
  * param) so an orchestrator's two different probe configurations (frequent, cheap liveness;
  * less frequent, dependency-aware readiness) can point at two different, unambiguous URLs. See
  * docs/operations.md.
+ *
+ * Exempt from every rate-limit budget (`@SkipThrottle`) — an orchestrator's health probes are
+ * infrastructure traffic, not user traffic, and must never compete with real requests for the
+ * same budget or get themselves rate-limited into reporting a false outage.
  */
 @ApiTags('health')
 @Controller('health')
+@SkipThrottle()
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 
