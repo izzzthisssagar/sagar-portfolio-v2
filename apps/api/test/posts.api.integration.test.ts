@@ -65,7 +65,9 @@ databaseSuite('Field Notes vertical: persistence, publication workflow, public v
   let imageSeed = 0;
   async function uploadApprovedImage() {
     imageSeed += 1;
-    const base = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#3355ff' } })
+    const base = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: '#3355ff' },
+    })
       .png()
       .toBuffer();
     const buffer = Buffer.concat([base, Buffer.from(`${prefix}featured-${imageSeed}`)]);
@@ -85,7 +87,9 @@ databaseSuite('Field Notes vertical: persistence, publication workflow, public v
 
   async function uploadQuarantinedImage() {
     imageSeed += 1;
-    const base = await sharp({ create: { width: 20, height: 4, channels: 3, background: '#112233' } })
+    const base = await sharp({
+      create: { width: 20, height: 4, channels: 3, background: '#112233' },
+    })
       .png()
       .toBuffer();
     const buffer = Buffer.concat([base, Buffer.from(`${prefix}quarantined-${imageSeed}`)]);

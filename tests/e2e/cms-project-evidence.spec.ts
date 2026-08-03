@@ -54,7 +54,10 @@ test.describe('CMS project evidence gallery only accepts approved images', () =>
     // whole run, and a create+delete round trip through the UI costs several more requests than
     // this test's actual subject (what the evidence dropdown offers) needs.
     await page.goto('/admin/projects');
-    await page.getByRole('row', { name: /qa-mastery/i }).getByRole('link', { name: 'EDIT' }).click();
+    await page
+      .getByRole('row', { name: /qa-mastery/i })
+      .getByRole('link', { name: 'EDIT' })
+      .click();
     await expect(page).toHaveURL(/\/admin\/projects\/[a-z0-9]+$/);
 
     // The "Approved image" select is populated from GET /admin/media?status=approved&category=image
