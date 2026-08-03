@@ -165,31 +165,41 @@ export class AuthService {
     };
   }
 
-  /** Revokes the whole session family and bumps tokenVersion in one
-   * transaction — both a genuine reuse (replay of an already-retired
-   * token) and a stale tokenVersion (the session predates a logout-all or
-   * an earlier reuse event) are treated identically: assume the family is
-   * compromised or simply superseded, kill every session, and invalidate
-   * any access token already issued under the old version. Bundling the
-   * revoke and the bump together is what makes "no concurrent refresh may
-   * restore a session after logout-all" hold — a concurrent refresh either
-   * sees this transaction's committed effects (revokedAt set, so its own
-   * claim fails) or commits first itself, in which case *its* descendant
-   * still carries the pre-bump tokenVersion and is therefore rejected by
-   * every later check (JwtAuthGuard for the access token, this same
-   * tokenVersion comparison for any attempt to refresh it again). */
-  private async revokeFamilyAsReuse(userId: string, now: Date, ip?: string) {
-    await this.prisma.$transaction([
-      this.prisma.refreshSession.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: now },
-      }),
-      this.prisma.adminUser.update({
-        where: { id: userId },
+  /** Handles a genuine reuse event — a replay of a retired token whose
+   * generation (tokenVersion) is still the admin's *current* one — with a
+   * conditional claim, not an unconditional bump: `adminUser.updateMany`'s
+   * WHERE requires tokenVersion to still equal the compromised generation,
+   * so under concurrent replays of the same retired token, Postgres's row
+   * lock on AdminUser serializes the attempts and only the first commits;
+   * every later one re-evaluates the WHERE against the already-bumped row
+   * and matches zero rows. That's what keeps ten simultaneous replays to
+   * exactly one increment, one revoke sweep, and one audit event — the
+   * losers change nothing and log nothing. The revoke sweep itself is
+   * scoped to `tokenVersion: compromisedTokenVersion`, so it can only ever
+   * touch sessions from the generation being retired, never a newer one
+   * (e.g. one created by a login that happened after this reuse was
+   * detected — see the stale-tokenVersion branch in `refresh`, which is
+   * what makes that safe: a session from a newer generation is never
+   * routed into this method at all). */
+  private async revokeFamilyAsReuse(
+    userId: string,
+    compromisedTokenVersion: number,
+    now: Date,
+    ip?: string,
+  ) {
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.adminUser.updateMany({
+        where: { id: userId, tokenVersion: compromisedTokenVersion },
         data: { tokenVersion: { increment: 1 } },
-      }),
-    ]);
-    await this.audit('REFRESH_REUSE_DETECTED', userId, ip);
+      });
+      if (claim.count === 0) return false;
+      await tx.refreshSession.updateMany({
+        where: { userId, tokenVersion: compromisedTokenVersion, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      return true;
+    });
+    if (claimed) await this.audit('REFRESH_REUSE_DETECTED', userId, ip);
   }
 
   async refresh(rawToken: string | undefined, ip?: string): Promise<SessionTokens> {
@@ -203,12 +213,25 @@ export class AuthService {
     if (!session) throw new SessionExpiredException();
     const now = new Date();
 
-    // Reused (already-retired) token, or a session whose tokenVersion no
-    // longer matches the admin's current one (logout-all or an earlier
-    // reuse event happened after this session was created/rotated) — both
-    // are handled the same way.
-    if (session.revokedAt || session.tokenVersion !== session.user.tokenVersion) {
-      await this.revokeFamilyAsReuse(session.userId, now, ip);
+    // A session whose tokenVersion no longer matches the admin's current
+    // one belongs to a generation that's already been fully retired — by
+    // an earlier reuse event (which already revoked that whole generation
+    // and bumped tokenVersion) or a logout-all. It is *not* a new reuse
+    // event: reacting to it the same way reuse is handled would mean
+    // replaying this same ancient token forever keeps bumping tokenVersion
+    // and revoking whatever the admin's *current*, unrelated generation
+    // looks like — an indefinite, attacker-triggerable lockout from a
+    // single old leaked token. Reject it on its own, touching nothing.
+    if (session.tokenVersion !== session.user.tokenVersion) {
+      await this.audit('STALE_REFRESH_REJECTED', session.userId, ip);
+      throw new SessionExpiredException('Session revoked.');
+    }
+
+    // Same generation, but this exact token was already rotated — a replay
+    // of a retired token within the *current* generation is a genuine new
+    // reuse event.
+    if (session.revokedAt) {
+      await this.revokeFamilyAsReuse(session.userId, session.tokenVersion, now, ip);
       throw new SessionExpiredException('Session revoked.');
     }
     if (session.expiresAt <= now) throw new SessionExpiredException();
@@ -223,9 +246,27 @@ export class AuthService {
     // WHERE clause against the just-committed row once the lock is
     // released — so at most one of any number of concurrent callers can
     // ever match and claim the session; every other caller sees `count: 0`.
-    // The same lock is what serializes this against a concurrent
-    // logout-all's session-revoke update — whichever commits first wins.
     const rotated = await this.prisma.$transaction(async (tx) => {
+      // Touch the admin row *first*, conditioned on the generation we
+      // expect — a no-op write when it matches, but as an UPDATE it takes
+      // a row lock on AdminUser for the rest of this transaction. That's
+      // what serializes rotation against a concurrent logout-all or reuse
+      // event, both of which also touch AdminUser first (see logoutAll and
+      // revokeFamilyAsReuse): without it, logout-all's session-revoke
+      // sweep could take its snapshot *before* the descendant row below
+      // exists, and under READ COMMITTED an UPDATE simply never sees a row
+      // inserted after its snapshot was taken — even if that insert's
+      // transaction commits before the sweep's transaction does. Locking
+      // the same row both sides touch first forces one to fully finish
+      // (sweep included) before the other can begin, so the sweep either
+      // runs entirely before this descendant exists (and this rotation
+      // then sees the version has moved and aborts below) or entirely
+      // after (and correctly catches it).
+      const stillCurrentGeneration = await tx.adminUser.updateMany({
+        where: { id: session.userId, tokenVersion: session.tokenVersion },
+        data: { tokenVersion: session.tokenVersion },
+      });
+      if (stillCurrentGeneration.count === 0) return null;
       const claim = await tx.refreshSession.updateMany({
         where: { id: session.id, revokedAt: null },
         data: { revokedAt: now },
@@ -254,7 +295,7 @@ export class AuthService {
       // identically to presenting an already-retired token — the whole
       // session family (including whichever descendant just won the race)
       // is revoked and the attempt is audited as a reuse event.
-      await this.revokeFamilyAsReuse(session.userId, now, ip);
+      await this.revokeFamilyAsReuse(session.userId, session.tokenVersion, now, ip);
       throw new SessionExpiredException('Session revoked.');
     }
 
@@ -285,18 +326,27 @@ export class AuthService {
     // family. If these were two separate writes, a refresh racing between
     // them could read the session as still-active under the old
     // tokenVersion and rotate it — a session "restored" after logout-all.
-    // With the writes atomic, a concurrent refresh either sees both
-    // committed (its claim on the now-revoked row fails) or commits first
-    // itself, in which case its descendant still carries the pre-bump
-    // tokenVersion and is rejected by every later check.
+    //
+    // The AdminUser write goes *first* in this batch, not the session
+    // sweep — Prisma runs a `$transaction([...])` array sequentially in
+    // the given order within one transaction, and the order matters here.
+    // Refresh's own rotation also touches AdminUser before it creates a
+    // descendant row (see `refresh`), so whichever of the two gets there
+    // first forces the other to wait for the full transaction (session
+    // sweep included) to finish. Sweeping sessions first would leave a
+    // window where a concurrent rotation's brand-new descendant simply
+    // isn't visible yet to this sweep's snapshot — Postgres's UPDATE under
+    // READ COMMITTED never picks up a row inserted by another transaction
+    // after this statement's own snapshot was taken, even if that other
+    // transaction commits before this one does.
     await this.prisma.$transaction([
-      this.prisma.refreshSession.updateMany({
-        where: { userId: adminId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
       this.prisma.adminUser.update({
         where: { id: adminId },
         data: { tokenVersion: { increment: 1 } },
+      }),
+      this.prisma.refreshSession.updateMany({
+        where: { userId: adminId, revokedAt: null },
+        data: { revokedAt: new Date() },
       }),
     ]);
     await this.audit('LOGOUT_ALL', adminId, ip);

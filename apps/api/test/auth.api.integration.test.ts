@@ -256,6 +256,162 @@ databaseSuite('Authentication vertical', () => {
     expect(rejected.body.error.message).toMatch(/administrator session required/i);
   });
 
+  it('handles retired-token replay idempotently: first replay revokes and bumps once, repeat replays are inert, a fresh login is unaffected', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const loginCookies = login.headers['set-cookie'] as unknown as string[];
+    const csrfToken = cookieValue(loginCookies, 'portfolio_csrf')!;
+    const ancientRefreshToken = cookieValue(loginCookies, 'portfolio_refresh')!;
+    const ancientCookie = [
+      `portfolio_refresh=${ancientRefreshToken}`,
+      `portfolio_csrf=${csrfToken}`,
+    ];
+    const admin = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+    const versionBefore = admin.tokenVersion;
+
+    // Retire the token via one legitimate rotation.
+    const rotated = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', ancientCookie)
+      .expect(200);
+    const rotatedCookies = rotated.headers['set-cookie'] as unknown as string[];
+    const currentGenAccessToken = cookieValue(rotatedCookies, 'portfolio_access')!;
+
+    // A. First replay of the now-retired token: revokes the current
+    // generation and bumps tokenVersion exactly once.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', ancientCookie)
+      .expect(401);
+
+    const afterFirstReplay = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+    expect(afterFirstReplay.tokenVersion).toBe(versionBefore + 1);
+    expect(
+      await prisma.refreshSession.count({
+        where: { userId: admin.id, tokenVersion: versionBefore, revokedAt: null },
+      }),
+    ).toBe(0);
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${currentGenAccessToken}`)
+      .expect(401);
+    expect(
+      await prisma.auditLog.count({
+        where: { action: 'REFRESH_REUSE_DETECTED', actorId: admin.id },
+      }),
+    ).toBe(1);
+
+    // B. Replaying the same ancient token a second time: SESSION_EXPIRED,
+    // no further tokenVersion increment, no second reuse audit event.
+    const secondReplay = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', ancientCookie)
+      .expect(401);
+    expect(secondReplay.body.error.code).toBe('SESSION_EXPIRED');
+    expect((await prisma.adminUser.findUniqueOrThrow({ where: { email } })).tokenVersion).toBe(
+      versionBefore + 1,
+    );
+    expect(
+      await prisma.auditLog.count({
+        where: { action: 'REFRESH_REUSE_DETECTED', actorId: admin.id },
+      }),
+    ).toBe(1);
+
+    // C. The administrator logs in again (a brand-new generation).
+    // Replaying the ancient token yet again must not touch it.
+    const secondLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const secondLoginCookies = secondLogin.headers['set-cookie'] as unknown as string[];
+    const newAccessToken = cookieValue(secondLoginCookies, 'portfolio_access')!;
+    const newRefreshToken = cookieValue(secondLoginCookies, 'portfolio_refresh')!;
+    const newCsrf = cookieValue(secondLoginCookies, 'portfolio_csrf')!;
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', ancientCookie)
+      .expect(401);
+
+    // The new session is completely unaffected: its access token still
+    // authenticates, and its refresh token still rotates.
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/session')
+      .set('Authorization', `Bearer ${newAccessToken}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', newCsrf)
+      .set('Cookie', [`portfolio_refresh=${newRefreshToken}`, `portfolio_csrf=${newCsrf}`])
+      .expect(200);
+
+    // Still only bumped once, total, across this whole sequence.
+    expect((await prisma.adminUser.findUniqueOrThrow({ where: { email } })).tokenVersion).toBe(
+      versionBefore + 1,
+    );
+  });
+
+  it('lets ten simultaneous replays of one already-retired token cause at most one version increment and one reuse audit event', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_URL)
+      .send({ email, password })
+      .expect(200);
+    const loginCookies = login.headers['set-cookie'] as unknown as string[];
+    const csrfToken = cookieValue(loginCookies, 'portfolio_csrf')!;
+    const refreshToken = cookieValue(loginCookies, 'portfolio_refresh')!;
+    const cookieHeader = [`portfolio_refresh=${refreshToken}`, `portfolio_csrf=${csrfToken}`];
+
+    // Retire it via one legitimate rotation.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', WEB_URL)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Cookie', cookieHeader)
+      .expect(200);
+
+    const adminBefore = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+
+    const replays = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        request(app.getHttpServer())
+          .post('/api/v1/auth/refresh')
+          .set('Origin', WEB_URL)
+          .set('X-CSRF-Token', csrfToken)
+          .set('Cookie', cookieHeader),
+      ),
+    );
+    expect(replays.every((r) => r.status === 401)).toBe(true);
+
+    const adminAfter = await prisma.adminUser.findUniqueOrThrow({ where: { email } });
+    expect(adminAfter.tokenVersion).toBe(adminBefore.tokenVersion + 1);
+    expect(
+      await prisma.auditLog.count({
+        where: { action: 'REFRESH_REUSE_DETECTED', actorId: adminBefore.id },
+      }),
+    ).toBe(1);
+    // No partial session state — the whole retired generation is revoked,
+    // nothing half-updated.
+    expect(
+      await prisma.refreshSession.count({
+        where: { userId: adminBefore.id, tokenVersion: adminBefore.tokenVersion, revokedAt: null },
+      }),
+    ).toBe(0);
+  });
+
   it('lets a refresh racing logout-all leave no usable session behind', async () => {
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
@@ -352,15 +508,23 @@ databaseSuite('Authentication vertical', () => {
       .expect(401);
     expect(rejected.body.error.code).toBe('SESSION_EXPIRED');
 
+    // A stale-generation session is rejected without being touched — it's
+    // not treated as a new reuse event (that would mean replaying the same
+    // ancient token forever keeps bumping tokenVersion and revoking
+    // whatever the admin's current, unrelated generation looks like).
     const staleRow = await prisma.refreshSession.findUnique({
       where: { tokenHash: hashRefreshToken(staleRawToken) },
     });
-    expect(staleRow?.revokedAt).toBeTruthy();
+    expect(staleRow?.revokedAt).toBeFalsy();
 
+    const staleAudits = await prisma.auditLog.count({
+      where: { action: 'STALE_REFRESH_REJECTED', actorId: admin.id },
+    });
+    expect(staleAudits).toBeGreaterThanOrEqual(1);
     const reuseAudits = await prisma.auditLog.count({
       where: { action: 'REFRESH_REUSE_DETECTED', actorId: admin.id },
     });
-    expect(reuseAudits).toBeGreaterThanOrEqual(1);
+    expect(reuseAudits).toBe(0);
   });
 
   it('serializes concurrent failed-login attempts so the lockout threshold is never lost', async () => {
