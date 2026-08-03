@@ -89,15 +89,20 @@ model AuditLog {
 }
 
 model Profile {
-  id           String   @id @default(cuid())
-  name         String
-  headline     String
-  bio          String
-  location     String
-  availability String
-  email        String?
-  cvMediaId    String?
-  updatedAt    DateTime @updatedAt
+  id              String      @id @default(cuid())
+  name            String
+  headline        String
+  bio             String
+  location        String
+  availability    String
+  email           String?
+  /// Legacy plain-string field, unenforced — superseded by CvDocument.active as the source of
+  /// truth for which CV is live (see docs/sprint-3.md). Left in place rather than migrated away
+  /// since nothing reads it.
+  cvMediaId       String?
+  portraitMediaId String?
+  portraitMedia   MediaAsset? @relation(fields: [portraitMediaId], references: [id], onDelete: SetNull)
+  updatedAt       DateTime    @updatedAt
 }
 
 model Experience {
@@ -179,17 +184,40 @@ model ProjectFinding {
   project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
+/// Project evidence — a MediaAsset attached to a Project with its own caption/status, distinct
+/// from the asset's own approval status. Only APPROVED MediaAsset rows may be attached
+/// (enforced in ProjectEvidenceService, not at the DB level, matching the rest of the app's
+/// publish-time-validation convention). See docs/sprint-3.md.
 model ProjectMedia {
-  id        String     @id @default(cuid())
-  caption   String?
-  altText   String?
-  order     Int        @default(0)
-  projectId String
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  mediaId   String
-  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  id             String         @id @default(cuid())
+  title          String?
+  caption        String?
+  altText        String?
+  sourceNote     String?
+  evidenceStatus EvidenceStatus @default(PENDING)
+  order          Int            @default(0)
+  projectId      String
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mediaId        String
+  media          MediaAsset     @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@unique([projectId, mediaId])
+}
+
+/// Tracks CV PDF versions uploaded through the media pipeline. Exactly one row may have
+/// `active = true` at a time (enforced transactionally in CvService, not a DB constraint) — the
+/// public CV download route serves whichever MediaAsset that row points to.
+model CvDocument {
+  id          String     @id @default(cuid())
+  mediaId     String     @unique
+  media       MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  title       String
+  versionNote String?
+  active      Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
 model BlogPost {
@@ -316,6 +344,8 @@ model MediaAsset {
   projects        ProjectMedia[]
   socialFor       BlogPost[]     @relation("BlogPostSocialImage")
   featuredFor     BlogPost[]     @relation("BlogPostFeaturedImage")
+  portraitFor     Profile[]
+  cvDocument      CvDocument?
 
   @@index([status])
   @@index([category])

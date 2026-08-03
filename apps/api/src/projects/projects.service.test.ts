@@ -68,6 +68,11 @@ describe('ProjectsService', () => {
       include: {
         metrics: { where: { evidence: 'CONFIRMED' }, orderBy: { order: 'asc' } },
         findings: { orderBy: { order: 'asc' } },
+        media: {
+          where: { evidenceStatus: 'CONFIRMED', media: { status: 'APPROVED' } },
+          orderBy: { order: 'asc' },
+          include: { media: true },
+        },
       },
     });
   });

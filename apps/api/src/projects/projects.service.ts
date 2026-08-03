@@ -22,6 +22,7 @@ function projectView<
     status: PublicationStatus;
     metrics?: { evidence: EvidenceStatus }[];
     findings?: { evidenceStatus: EvidenceStatus }[];
+    media?: { evidenceStatus: EvidenceStatus }[];
   },
 >(project: T) {
   return {
@@ -35,6 +36,17 @@ function projectView<
           findings: project.findings.map((f) => ({
             ...f,
             evidenceStatus: f.evidenceStatus.toLowerCase(),
+          })),
+        }
+      : {}),
+    ...(project.media
+      ? {
+          // Exposed as `evidence`, not `media` — `media` is the raw ProjectMedia relation name,
+          // `evidence` is the public-facing concept (see docs/sprint-3.md / ProjectMedia model
+          // comment in schema.prisma).
+          evidence: project.media.map((m) => ({
+            ...m,
+            evidenceStatus: m.evidenceStatus.toLowerCase(),
           })),
         }
       : {}),
@@ -106,6 +118,14 @@ export class ProjectsService {
         // claim); the admin API and draft preview return every metric.
         metrics: { where: { evidence: EvidenceStatus.CONFIRMED }, orderBy: { order: 'asc' } },
         findings: { orderBy: { order: 'asc' } },
+        // Same rule as metrics: only CONFIRMED evidence backed by a still-APPROVED asset is
+        // ever shown publicly — pending/unavailable evidence must never look confirmed, and an
+        // asset approved at attach-time but later archived/rejected stops appearing.
+        media: {
+          where: { evidenceStatus: EvidenceStatus.CONFIRMED, media: { status: 'APPROVED' } },
+          orderBy: { order: 'asc' },
+          include: { media: true },
+        },
       },
     });
     if (!project) throw new NotFoundException('Project not found');
@@ -118,6 +138,7 @@ export class ProjectsService {
       include: {
         metrics: { orderBy: { order: 'asc' } },
         findings: { orderBy: { order: 'asc' } },
+        media: { orderBy: { order: 'asc' }, include: { media: true } },
       },
     });
     if (!project) throw new NotFoundException('Project not found');

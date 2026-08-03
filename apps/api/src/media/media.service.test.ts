@@ -191,6 +191,34 @@ describe('MediaService', () => {
       projects: [{ id: 'pm1' }],
       socialFor: [],
       featuredFor: [],
+      portraitFor: [],
+      cvDocument: null,
+    });
+    await expect(service.remove('m1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('blocks deletion of the active portrait', async () => {
+    const { service, prisma } = setup();
+    prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+      ...baseMedia,
+      projects: [],
+      socialFor: [],
+      featuredFor: [],
+      portraitFor: [{ id: 'profile1' }],
+      cvDocument: null,
+    });
+    await expect(service.remove('m1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('blocks deletion of media referenced by a CV document', async () => {
+    const { service, prisma } = setup();
+    prisma.mediaAsset.findUnique.mockResolvedValueOnce({
+      ...baseMedia,
+      projects: [],
+      socialFor: [],
+      featuredFor: [],
+      portraitFor: [],
+      cvDocument: { id: 'cv1' },
     });
     await expect(service.remove('m1')).rejects.toBeInstanceOf(ConflictException);
   });
@@ -202,6 +230,8 @@ describe('MediaService', () => {
       projects: [],
       socialFor: [],
       featuredFor: [],
+      portraitFor: [],
+      cvDocument: null,
     });
     await storage.put('quarantine/abc.png', Buffer.from('x'), 'image/png');
     await service.remove('m1', 'admin1');

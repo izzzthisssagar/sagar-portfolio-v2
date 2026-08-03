@@ -200,6 +200,30 @@ export async function seedPosts(prisma: PrismaService) {
   console.log(`Seeded ${fieldNotesArticles.length} Field Notes article(s) (draft).`);
 }
 
+/**
+ * Seeds the single Profile row using copy already live on the site (Hero component,
+ * apps/web/components/HomeSections.tsx) verbatim — not invented for this seed. Portrait and CV
+ * activation are admin actions (Sprint 3 portrait/CV management), not seeded here; this only
+ * ensures the row exists so `POST /admin/profile/portrait` has something to update (see
+ * ProfileService.requireProfile).
+ */
+async function seedProfile(prisma: PrismaService) {
+  const existing = await prisma.profile.findFirst();
+  const fields = {
+    name: 'Sagar Thapa',
+    headline: 'Quality Engineer',
+    bio: 'I investigate interfaces, business rules, APIs, security, accessibility, and performance to uncover failures before release.',
+    location: 'Rupandehi, Nepal',
+    availability: 'Available for QA and software opportunities',
+  };
+  if (existing) {
+    await prisma.profile.update({ where: { id: existing.id }, data: fields });
+  } else {
+    await prisma.profile.create({ data: fields });
+  }
+  console.log('Seeded Profile.');
+}
+
 /** Reused directly by the Playwright global setup, and by the `db:seed`
  * CLI entrypoint (`prisma/seed.ts`) — both need the exact same idempotent
  * seed. */
@@ -207,4 +231,5 @@ export async function seedContent(prisma: PrismaService) {
   await seedProject(prisma, qaMastery);
   await seedProject(prisma, numazuHalalFood);
   await seedPosts(prisma);
+  await seedProfile(prisma);
 }

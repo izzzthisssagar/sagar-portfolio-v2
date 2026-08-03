@@ -7,6 +7,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PostsModule } from './posts/posts.module';
 import { MediaModule } from './media/media.module';
+import { ProfileModule } from './profile/profile.module';
+import { CvModule } from './cv/cv.module';
 import { PrismaModule } from './prisma/prisma.module';
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { PrismaModule } from './prisma/prisma.module';
     ProjectsModule,
     PostsModule,
     MediaModule,
+    ProfileModule,
+    CvModule,
     DashboardModule,
   ],
   controllers: [HealthController],

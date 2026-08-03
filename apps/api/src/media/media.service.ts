@@ -75,6 +75,18 @@ export class MediaService {
     return { buffer, mimeType: media.mimeType, filename: media.filename };
   }
 
+  /** Public counterpart to `getFile` — returns null (never throws) for anything that isn't
+   * APPROVED, so `PublicMediaController` can 404 without distinguishing "doesn't exist" from
+   * "exists but not public" to the caller. */
+  async getApprovedFile(
+    id: string,
+  ): Promise<{ buffer: Buffer; mimeType: string; filename: string } | null> {
+    const media = await this.prisma.mediaAsset.findUnique({ where: { id } });
+    if (!media || media.status !== MediaStatus.APPROVED) return null;
+    const buffer = await this.storage.get(media.storageKey);
+    return { buffer, mimeType: media.mimeType, filename: media.filename };
+  }
+
   async upload(file: { buffer: Buffer; originalname: string; mimetype: string }, actorId?: string) {
     const result = await validateUpload(file.buffer, file.originalname, file.mimetype);
     if (!result.ok) {
@@ -254,15 +266,26 @@ export class MediaService {
   async remove(id: string, actorId?: string) {
     const media = await this.prisma.mediaAsset.findUnique({
       where: { id },
-      include: { projects: true, socialFor: true, featuredFor: true },
+      include: {
+        projects: true,
+        socialFor: true,
+        featuredFor: true,
+        portraitFor: true,
+        cvDocument: true,
+      },
     });
     if (!media) throw new NotFoundException('Media asset not found');
     const inUse =
-      media.projects.length > 0 || media.socialFor.length > 0 || media.featuredFor.length > 0;
+      media.projects.length > 0 ||
+      media.socialFor.length > 0 ||
+      media.featuredFor.length > 0 ||
+      media.portraitFor.length > 0 ||
+      media.cvDocument !== null;
     if (inUse) {
       throw new ConflictException({
         code: 'MEDIA_IN_USE',
-        message: 'This media asset is attached to a project or post. Detach it before deleting.',
+        message:
+          'This media asset is attached to a project, post, portrait, or CV document. Detach it before deleting.',
       });
     }
     // Storage delete first: if it fails, the DB row (and thus the still-quarantined/approved
