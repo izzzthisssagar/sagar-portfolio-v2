@@ -23,6 +23,12 @@ enum MediaStatus {
   QUARANTINED
   APPROVED
   REJECTED
+  ARCHIVED
+}
+
+enum MediaCategory {
+  IMAGE
+  DOCUMENT
 }
 
 enum ContactStatus {
@@ -46,6 +52,7 @@ model AdminUser {
   updatedAt        DateTime         @updatedAt
   sessions         RefreshSession[]
   auditLogs        AuditLog[]
+  uploadedMedia    MediaAsset[]
 }
 
 model RefreshSession {
@@ -283,22 +290,36 @@ model ContactMessage {
 }
 
 model MediaAsset {
-  id          String         @id @default(cuid())
-  filename    String
-  storageKey  String         @unique
-  mimeType    String
-  extension   String
-  byteSize    Int
-  sha256      String
-  status      MediaStatus    @default(QUARANTINED)
-  altText     String?
-  width       Int?
-  height      Int?
-  durationMs  Int?
-  createdAt   DateTime       @default(now())
-  projects    ProjectMedia[]
-  socialFor   BlogPost[]     @relation("BlogPostSocialImage")
-  featuredFor BlogPost[]     @relation("BlogPostFeaturedImage")
+  id              String         @id @default(cuid())
+  filename        String
+  storageKey      String         @unique
+  mimeType        String
+  extension       String
+  category        MediaCategory
+  byteSize        Int
+  sha256          String
+  status          MediaStatus    @default(QUARANTINED)
+  altText         String?
+  decorative      Boolean        @default(false)
+  caption         String?
+  sourceNote      String?
+  rejectionReason String?
+  width           Int?
+  height          Int?
+  durationMs      Int?
+  metadata        Json?
+  createdById     String?
+  createdBy       AdminUser?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  projects        ProjectMedia[]
+  socialFor       BlogPost[]     @relation("BlogPostSocialImage")
+  featuredFor     BlogPost[]     @relation("BlogPostFeaturedImage")
+
+  @@index([status])
+  @@index([category])
+  @@index([sha256])
 }
 
 model SiteSetting {
