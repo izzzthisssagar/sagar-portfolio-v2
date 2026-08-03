@@ -28,74 +28,74 @@ two enforcement sites for historical/testing reasons, not two different policies
 
 ### Core
 
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `NODE_ENV` | no | `development` | `development` \| `test` \| `production` |
-| `DATABASE_URL` | **yes** | — | must start with `postgres` |
-| `WEB_URL` | no | `http://localhost:3000` | must be a valid URL |
-| `API_URL` | no | — | must be a valid URL when set; used for CSRF Host validation |
-| `PORT` | no | `4000` | 1–65535 |
+| Variable       | Required | Default                 | Notes                                                       |
+| -------------- | -------- | ----------------------- | ----------------------------------------------------------- |
+| `NODE_ENV`     | no       | `development`           | `development` \| `test` \| `production`                     |
+| `DATABASE_URL` | **yes**  | —                       | must start with `postgres`                                  |
+| `WEB_URL`      | no       | `http://localhost:3000` | must be a valid URL                                         |
+| `API_URL`      | no       | —                       | must be a valid URL when set; used for CSRF Host validation |
+| `PORT`         | no       | `4000`                  | 1–65535                                                     |
 
 ### Authentication
 
-| Variable | Required | Notes |
-|---|---|---|
-| `ACCESS_TOKEN_SECRET` | **yes** | ≥32 chars, rejects the `replace-` placeholder |
-| `ACCESS_TOKEN_ISSUER` | **yes** | non-empty |
-| `ACCESS_TOKEN_AUDIENCE` | **yes** | non-empty |
-| `REFRESH_TOKEN_SECRET` | **yes** | ≥32 chars — validated for forward-compatibility; not currently read by refresh-token issuance (opaque DB-hashed tokens, see `auth.service.ts`) |
-| `REFRESH_TOKEN_TTL_DAYS` | no | default `7`, bounded 1–365 |
+| Variable                 | Required | Notes                                                                                                                                          |
+| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACCESS_TOKEN_SECRET`    | **yes**  | ≥32 chars, rejects the `replace-` placeholder                                                                                                  |
+| `ACCESS_TOKEN_ISSUER`    | **yes**  | non-empty                                                                                                                                      |
+| `ACCESS_TOKEN_AUDIENCE`  | **yes**  | non-empty                                                                                                                                      |
+| `REFRESH_TOKEN_SECRET`   | **yes**  | ≥32 chars — validated for forward-compatibility; not currently read by refresh-token issuance (opaque DB-hashed tokens, see `auth.service.ts`) |
+| `REFRESH_TOKEN_TTL_DAYS` | no       | default `7`, bounded 1–365                                                                                                                     |
 
 ### Administrator provisioning (CLI only — never required for the API server to boot)
 
-| Variable | Required (for `pnpm admin:create`) |
-|---|---|
-| `ADMIN_EMAIL` | yes, valid email |
-| `ADMIN_PASSWORD` | yes |
+| Variable         | Required (for `pnpm admin:create`) |
+| ---------------- | ---------------------------------- |
+| `ADMIN_EMAIL`    | yes, valid email                   |
+| `ADMIN_PASSWORD` | yes                                |
 
 ### Media
 
-| Variable | Required | Notes |
-|---|---|---|
-| `MEDIA_STORAGE_DRIVER` | production only | `local` \| `s3`; production must set `s3` |
-| `MEDIA_STORAGE_LOCAL_PATH` | no | used when driver is `local` |
-| `MEDIA_STORAGE_ENDPOINT` | no | valid URL (S3-compatible custom endpoint, e.g. MinIO) |
-| `MEDIA_STORAGE_REGION` / `_BUCKET` / `_ACCESS_KEY` / `_SECRET_KEY` | required when driver=`s3` | |
-| `MEDIA_STORAGE_PUBLIC_BASE_URL` | no | valid URL |
-| `MEDIA_MAX_IMAGE_BYTES` | no | default 8 MiB, bounded 1 KiB–100 MiB |
-| `MEDIA_MAX_PDF_BYTES` | no | default 15 MiB, bounded 1 KiB–200 MiB |
+| Variable                                                           | Required                  | Notes                                                 |
+| ------------------------------------------------------------------ | ------------------------- | ----------------------------------------------------- |
+| `MEDIA_STORAGE_DRIVER`                                             | production only           | `local` \| `s3`; production must set `s3`             |
+| `MEDIA_STORAGE_LOCAL_PATH`                                         | no                        | used when driver is `local`                           |
+| `MEDIA_STORAGE_ENDPOINT`                                           | no                        | valid URL (S3-compatible custom endpoint, e.g. MinIO) |
+| `MEDIA_STORAGE_REGION` / `_BUCKET` / `_ACCESS_KEY` / `_SECRET_KEY` | required when driver=`s3` |                                                       |
+| `MEDIA_STORAGE_PUBLIC_BASE_URL`                                    | no                        | valid URL                                             |
+| `MEDIA_MAX_IMAGE_BYTES`                                            | no                        | default 8 MiB, bounded 1 KiB–100 MiB                  |
+| `MEDIA_MAX_PDF_BYTES`                                              | no                        | default 15 MiB, bounded 1 KiB–200 MiB                 |
 
 ### Contact delivery
 
-| Variable | Required | Notes |
-|---|---|---|
-| `CONTACT_NOTIFICATION_DRIVER` | production only | `capture` \| `smtp`; production must set `smtp` |
-| `CONTACT_NOTIFICATION_TO` | required when driver=`smtp` | valid email |
-| `SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_FROM` | required when driver=`smtp` | `SMTP_PORT` 1–65535 |
-| `SMTP_SECURE` | no | `true`/`false`, default `false` |
+| Variable                                                    | Required                    | Notes                                           |
+| ----------------------------------------------------------- | --------------------------- | ----------------------------------------------- |
+| `CONTACT_NOTIFICATION_DRIVER`                               | production only             | `capture` \| `smtp`; production must set `smtp` |
+| `CONTACT_NOTIFICATION_TO`                                   | required when driver=`smtp` | valid email                                     |
+| `SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_FROM` | required when driver=`smtp` | `SMTP_PORT` 1–65535                             |
+| `SMTP_SECURE`                                               | no                          | `true`/`false`, default `false`                 |
 
 ### Operational
 
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `RATE_LIMIT_MAX` | no | `60` | bounded 1–100,000; CI-only override, see `docs/security-production.md` |
-| `TRUST_PROXY` | no | `false` | `false` \| `1` — see `docs/security-production.md` |
-| `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
-| `LOG_FORMAT` | no | JSON in production, pretty otherwise | `json` \| `pretty` |
-| `SERVICE_NAME` | no | `portfolio-api` | appears in every structured log line |
-| `RELEASE_SHA` | no | `unknown` | set to the deployed commit SHA in CI/containers |
-| `HEALTH_INTERNAL_TOKEN` | no | — | ≥16 chars when set; gates `/health/details` |
-| `SHUTDOWN_GRACE_PERIOD_MS` | no | `10000` | bounded 0–60,000 |
+| Variable                   | Required | Default                              | Notes                                                                  |
+| -------------------------- | -------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| `RATE_LIMIT_MAX`           | no       | `60`                                 | bounded 1–100,000; CI-only override, see `docs/security-production.md` |
+| `TRUST_PROXY`              | no       | `false`                              | `false` \| `1` — see `docs/security-production.md`                     |
+| `LOG_LEVEL`                | no       | `info`                               | `debug` \| `info` \| `warn` \| `error`                                 |
+| `LOG_FORMAT`               | no       | JSON in production, pretty otherwise | `json` \| `pretty`                                                     |
+| `SERVICE_NAME`             | no       | `portfolio-api`                      | appears in every structured log line                                   |
+| `RELEASE_SHA`              | no       | `unknown`                            | set to the deployed commit SHA in CI/containers                        |
+| `HEALTH_INTERNAL_TOKEN`    | no       | —                                    | ≥16 chars when set; gates `/health/details`                            |
+| `SHUTDOWN_GRACE_PERIOD_MS` | no       | `10000`                              | bounded 0–60,000                                                       |
 
 ### Web (Next.js) — separate from the API's config, see `apps/web/lib/env.ts`
 
-| Variable | Required | Notes |
-|---|---|---|
-| `NEXT_PUBLIC_API_URL` | **yes** (build-time, inlined into the browser bundle) | valid URL — never put a secret in a `NEXT_PUBLIC_*` variable |
-| `PUBLIC_SITE_URL` | production only | fails closed at build/render time when unset in production (pre-existing, Sprint 3 behavior) |
-| `WEB_URL` | no | default `http://localhost:3000` |
-| `ALLOW_STATIC_CONTENT_FALLBACK` | no | `true`/`false`, default `false`; must stay `false` in CI/production |
-| `API_URL` | no (server-only) | used by the Next proxy/middleware for the silent-refresh call; never sent to the browser |
+| Variable                        | Required                                              | Notes                                                                                        |
+| ------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_API_URL`           | **yes** (build-time, inlined into the browser bundle) | valid URL — never put a secret in a `NEXT_PUBLIC_*` variable                                 |
+| `PUBLIC_SITE_URL`               | production only                                       | fails closed at build/render time when unset in production (pre-existing, Sprint 3 behavior) |
+| `WEB_URL`                       | no                                                    | default `http://localhost:3000`                                                              |
+| `ALLOW_STATIC_CONTENT_FALLBACK` | no                                                    | `true`/`false`, default `false`; must stay `false` in CI/production                          |
+| `API_URL`                       | no (server-only)                                      | used by the Next proxy/middleware for the silent-refresh call; never sent to the browser     |
 
 ## Design rules
 

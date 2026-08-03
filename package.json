@@ -17,7 +17,7 @@
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "admin:create": "tsx apps/api/scripts/admin-create.ts",
     "db:seed": "tsx prisma/seed.ts",
-    "config:check": "tsx apps/api/scripts/config-check.ts"
+    "config:check": "tsx apps/api/scripts/config-check.ts && tsx apps/web/scripts/config-check.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.11.0",

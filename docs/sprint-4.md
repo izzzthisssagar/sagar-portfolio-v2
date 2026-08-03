@@ -66,6 +66,7 @@ documentation. This file is the index and the scope record.
   `RATE_LIMIT_MAX` override is preserved exactly as-is and does not change production behavior.
 
 ## Real vs. deferred (updated as work lands — see the final Sprint 4 report for the authoritative
+
 account of what shipped)
 
 This section is filled in as each phase completes.
