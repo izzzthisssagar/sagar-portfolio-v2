@@ -29,10 +29,20 @@ jobs:
       ACCESS_TOKEN_AUDIENCE: sagar-portfolio-cms-ci
       REFRESH_TOKEN_SECRET: ci-only-refresh-token-secret-at-least-32-chars
       WEB_URL: http://127.0.0.1:3000
-      API_URL: http://127.0.0.1:4000
+      # API_URL is deliberately NOT set here at job scope. The API's CSRF
+      # guard checks incoming requests' Host header against it, which is
+      # correct for the real `nest start` server bound to 127.0.0.1:4000
+      # (set per-step below, where that's true) but wrong for `pnpm test`,
+      # where NestJS integration specs talk to an in-process, ephemeral-port
+      # supertest server that was never bound to 127.0.0.1:4000 — setting
+      # API_URL there would make every cookie-authenticated mutation in
+      # those specs fail Host validation.
       NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
       ADMIN_EMAIL: ci-admin@example.invalid
       ADMIN_PASSWORD: Ci-Only-Test-Admin-Password-9!
+      # Explicit and off — CI must fail visibly on a broken API/content
+      # seed rather than silently rendering static fallback project pages.
+      ALLOW_STATIC_CONTENT_FALLBACK: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -47,7 +57,6 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm build
       - name: Provision a disposable test administrator
         run: pnpm admin:create
       - name: Confirm administrator provisioning refuses a duplicate
@@ -56,7 +65,57 @@ jobs:
             echo "Expected a second admin:create to fail (single administrator only)" >&2
             exit 1
           fi
+      - name: Seed idempotent content (QA Mastery, Numazu Halal Food)
+        run: pnpm db:seed
+      - name: Verify QA Mastery exists in PostgreSQL as a published project
+        run: |
+          row_count=$(psql "$DATABASE_URL" -tAc \
+            "select count(*) from \"Project\" where slug = 'qa-mastery' and status = 'PUBLISHED'")
+          if [ "$row_count" != "1" ]; then
+            echo "Expected exactly one published qa-mastery row in PostgreSQL, found: $row_count" >&2
+            exit 1
+          fi
+      # The API is started here, ahead of `pnpm build`, because with static
+      # fallback disabled, Next's build-time static generation (the home
+      # page, /work, and /work/[slug]'s generateStaticParams) now needs a
+      # real, reachable API instead of silently degrading to fallback
+      # content — exactly the behavior this sprint set out to require.
+      # Playwright's webServer config (`reuseExistingServer: true`) detects
+      # and reuses this same already-running server later for `test:e2e`.
+      - name: Start the API server
+        run: pnpm --filter @portfolio/api exec nest start &
+        env:
+          API_URL: http://127.0.0.1:4000
+      - name: Wait for the API to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4000/api/v1/health > /dev/null; then
+              echo "API is healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy within 30s" >&2
+          exit 1
+      - name: Verify /api/v1/projects/qa-mastery returns the seeded database record, not static fallback
+        run: |
+          body=$(curl -sf http://127.0.0.1:4000/api/v1/projects/qa-mastery)
+          node -e '
+            const data = JSON.parse(process.argv[1]).data;
+            if (!data || data.id === "01" || !data.liveUrl) {
+              console.error("qa-mastery response does not look like the seeded DB record:", data);
+              process.exit(1);
+            }
+            console.log("OK - qa-mastery served from DB record", data.id);
+          ' "$body"
+      - run: pnpm build
+        env:
+          API_URL: http://127.0.0.1:4000
       - run: pnpm exec playwright install --with-deps chromium
+      # Playwright's global setup re-runs this same idempotent seed and
+      # fails loudly if it doesn't land, and the smoke suite asserts
+      # GET /api/v1/projects/qa-mastery returns the real database record
+      # (not apps/web/lib/content.ts static fallback) — see tests/e2e/smoke.spec.ts.
       - run: pnpm test:e2e
       - run: pnpm audit --audit-level high
       - name: Tracked .env file check

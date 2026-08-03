@@ -1,11 +1,15 @@
 import { PrismaService } from '../../apps/api/src/prisma/prisma.service';
 import { provisionAdmin } from '../../apps/api/src/provisioning/admin-provisioning';
+import { seedContent } from '../../prisma/seed-content';
 import { TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD } from './test-admin';
 
 /**
- * Resets the single AdminUser row to a known test administrator before the
- * Playwright suite runs, so login/session/CMS specs have real credentials
- * to exercise against the real API and database — not a bypass token.
+ * Resets the single AdminUser row to a known test administrator, and runs
+ * the idempotent content seed, before the Playwright suite runs — so
+ * login/session/CMS specs have real credentials to exercise against the
+ * real API and database (not a bypass token), and public-content specs
+ * (e.g. QA Mastery) have a real database record to be served from instead
+ * of silently falling through to static fallback content.
  */
 export default async function globalSetup() {
   if (!process.env.DATABASE_URL) return;
@@ -15,6 +19,15 @@ export default async function globalSetup() {
     await prisma.refreshSession.deleteMany({});
     await prisma.adminUser.deleteMany({});
     await provisionAdmin({ prisma, email: TEST_ADMIN_EMAIL, password: TEST_ADMIN_PASSWORD });
+
+    await seedContent(prisma);
+    const qaMastery = await prisma.project.findUnique({ where: { slug: 'qa-mastery' } });
+    if (!qaMastery || qaMastery.status !== 'PUBLISHED') {
+      throw new Error(
+        'Content seed did not produce a published "qa-mastery" project in PostgreSQL — ' +
+          'public-content specs would silently pass against fallback content instead.',
+      );
+    }
   } finally {
     await prisma.$disconnect();
   }
