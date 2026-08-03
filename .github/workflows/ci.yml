@@ -69,7 +69,9 @@ jobs:
         run: pnpm db:seed
       - name: Verify QA Mastery exists in PostgreSQL as a published project
         run: |
-          row_count=$(psql "$DATABASE_URL" -tAc \
+          # `?schema=public` is a Prisma-specific query param, not a real
+          # libpq connection option — psql rejects it, so strip it.
+          row_count=$(psql "${DATABASE_URL%%\?*}" -tAc \
             "select count(*) from \"Project\" where slug = 'qa-mastery' and status = 'PUBLISHED'")
           if [ "$row_count" != "1" ]; then
             echo "Expected exactly one published qa-mastery row in PostgreSQL, found: $row_count" >&2
