@@ -1,0 +1,75 @@
+# syntax=docker/dockerfile:1
+# Multi-stage production build for @portfolio/api. Build from the repo root:
+#   docker build -f Dockerfile.api -t portfolio-api .
+# See docs/deployment.md for the full rationale and the staging compose stack that exercises this
+# image end to end.
+
+ARG NODE_VERSION=24
+
+# ---- base -------------------------------------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS base
+RUN corepack enable
+WORKDIR /repo
+
+# ---- deps: install the full workspace (dev deps included — needed to build) --------------------
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/game-engine/package.json packages/game-engine/package.json
+COPY packages/test-utils/package.json packages/test-utils/package.json
+COPY packages/three/package.json packages/three/package.json
+COPY packages/types/package.json packages/types/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/validation/package.json packages/validation/package.json
+RUN pnpm install --frozen-lockfile
+
+# ---- build: generate the Prisma client and compile the Nest app --------------------------------
+FROM deps AS build
+COPY prisma prisma
+COPY apps/api apps/api
+RUN pnpm exec prisma generate
+RUN pnpm --filter @portfolio/api run build
+
+# `pnpm deploy` prunes to exactly @portfolio/api's own production dependencies into a single
+# self-contained directory — the actual mechanism that keeps devDependencies, other workspace
+# packages, and the rest of the monorepo out of the runtime image.
+RUN pnpm --filter @portfolio/api deploy --prod --legacy /prod/api
+
+# `pnpm exec prisma generate` (above) writes the generated client engine into `.prisma/client`
+# next to `@prisma/client` inside the pnpm virtual store, NOT into @portfolio/api's own
+# node_modules — `pnpm deploy` only follows @prisma/client's own declared package files, so it
+# hard-copies the client package itself but leaves that sibling generated directory behind,
+# producing a `Cannot find module '.prisma/client/default'` crash at runtime. Copy it in
+# explicitly so the deployed tree is actually self-contained.
+RUN cp -r /repo/node_modules/.pnpm/@prisma+client@*/node_modules/.prisma /prod/api/node_modules/.prisma
+
+# ---- runtime: only the deployed, pruned package ------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Non-root runtime user — the image never runs the server as root.
+RUN addgroup -S app && adduser -S app -G app
+
+COPY --from=build --chown=app:app /prod/api ./
+
+# Local-storage media root, if MEDIA_STORAGE_DRIVER=local is ever used against this image — the
+# only writable path the runtime user needs. Every other path in the image is read-only in
+# practice (nothing writes there).
+RUN mkdir -p /app/media-data && chown app:app /app/media-data
+
+USER app
+EXPOSE 4000
+
+ARG RELEASE_SHA=unknown
+ENV RELEASE_SHA=${RELEASE_SHA}
+LABEL org.opencontainers.image.title="portfolio-api" \
+      org.opencontainers.image.revision=${RELEASE_SHA}
+
+# Plain `node`, not `npm`/`pnpm start` — a package-manager wrapper is an extra process that must
+# itself forward SIGTERM to the real Node process; running node directly means the container
+# runtime's signal goes straight to the process actually listening, which is what
+# apps/api/src/shutdown.ts's SIGTERM handler depends on to run at all.
+CMD ["node", "dist/src/main.js"]

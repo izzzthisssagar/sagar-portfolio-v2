@@ -12,7 +12,13 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"],
-      "env": ["DATABASE_URL", "ACCESS_TOKEN_SECRET", "ACCESS_TOKEN_ISSUER", "ACCESS_TOKEN_AUDIENCE"]
+      "env": [
+        "DATABASE_URL",
+        "ACCESS_TOKEN_SECRET",
+        "ACCESS_TOKEN_ISSUER",
+        "ACCESS_TOKEN_AUDIENCE",
+        "REFRESH_TOKEN_SECRET"
+      ]
     }
   }
 }

@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1
+# Multi-stage production build for @portfolio/web. Build from the repo root:
+#   docker build -f Dockerfile.web -t portfolio-web .
+# See docs/deployment.md for the full rationale and the staging compose stack that exercises this
+# image end to end.
+
+ARG NODE_VERSION=24
+
+# ---- base -------------------------------------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS base
+RUN corepack enable
+WORKDIR /repo
+
+# ---- deps: install the full workspace (dev deps included — needed to build) --------------------
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/game-engine/package.json packages/game-engine/package.json
+COPY packages/test-utils/package.json packages/test-utils/package.json
+COPY packages/three/package.json packages/three/package.json
+COPY packages/types/package.json packages/types/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/validation/package.json packages/validation/package.json
+RUN pnpm install --frozen-lockfile
+
+# ---- build: compile Next.js with output: 'standalone' -------------------------------------------
+FROM deps AS build
+COPY packages packages
+COPY apps/web apps/web
+
+# Build-time public configuration only (see docs/runtime-configuration.md) — no server secret may
+# be passed here, since NEXT_PUBLIC_* values are inlined into the client bundle at this step.
+ARG NEXT_PUBLIC_API_URL
+ARG PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV PUBLIC_SITE_URL=${PUBLIC_SITE_URL}
+
+# `generateStaticParams` (work/[slug], notes/[slug]) calls the API at build time to enumerate
+# which slugs to pre-render — but the image build has no network path to a live API, and must
+# stay deterministic regardless of backend state. Allowing the static seed fallback ONLY for this
+# RUN step lets the build enumerate a placeholder path set without failing; it is not a runtime
+# correctness concern because every fetch in lib/public-content.server.ts uses
+# `next: { revalidate: 60 }`, so real data replaces the placeholder within 60s of traffic, and
+# `dynamicParams` defaults to true so slugs absent from the placeholder set still render
+# on-demand. This ENV is scoped to the `build` stage only — the `runtime` stage below starts a
+# fresh `FROM` and never sets it, so production requests always fail closed per
+# docs/security-production.md.
+ENV ALLOW_STATIC_CONTENT_FALLBACK=true
+
+RUN pnpm --filter @portfolio/web run build
+
+# ---- runtime: only the standalone server output ------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Non-root runtime user — the image never runs the server as root.
+RUN addgroup -S app && adduser -S app -G app
+
+# `output: 'standalone'` (apps/web/next.config.ts) traces the monorepo and emits a pruned
+# server.js plus its own node_modules under .next/standalone — static assets and public files
+# are deliberately excluded from that trace and must be copied in separately.
+COPY --from=build --chown=app:app /repo/apps/web/.next/standalone ./
+COPY --from=build --chown=app:app /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=app:app /repo/apps/web/public ./apps/web/public
+
+USER app
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+ARG RELEASE_SHA=unknown
+ENV RELEASE_SHA=${RELEASE_SHA}
+LABEL org.opencontainers.image.title="portfolio-web" \
+      org.opencontainers.image.revision=${RELEASE_SHA}
+
+# Plain `node`, not `npm`/`pnpm start` — a package-manager wrapper is an extra process that must
+# itself forward SIGTERM to the real Node process; running node directly means the container
+# runtime's signal goes straight to the process actually listening.
+CMD ["node", "apps/web/server.js"]
