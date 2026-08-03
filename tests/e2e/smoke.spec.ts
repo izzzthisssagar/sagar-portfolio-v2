@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { SignJWT } from 'jose';
-import { hasDatabase, jwtTestConfig } from '../../playwright.config';
+import { hasDatabase } from '../../playwright.config';
+import { TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD } from './test-admin';
 
 const publicRoutes = [
   '/',
@@ -87,18 +87,26 @@ test('QA Mastery is served from the seeded PostgreSQL record, not static fallbac
   );
 });
 
-test('valid administrator JWT permits the CMS shell', async ({ context, page }) => {
-  const token = await new SignJWT({ role: 'admin' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject('playwright-admin')
-    .setIssuer(jwtTestConfig.accessIssuer)
-    .setAudience(jwtTestConfig.accessAudience)
-    .setIssuedAt()
-    .setExpirationTime('5m')
-    .sign(new TextEncoder().encode(jwtTestConfig.accessSecret));
-  await context.addCookies([
-    { name: 'portfolio_access', value: token, domain: '127.0.0.1', path: '/', httpOnly: true },
-  ]);
+test('a live, database-backed session permits the CMS shell — a well-formed JWT alone is not enough', async ({
+  context,
+  page,
+}) => {
+  test.skip(!hasDatabase, 'requires DATABASE_URL for the live API + a provisioned admin account');
+
+  // A forged-but-well-formed JWT for a `sub` with no real AdminUser row
+  // used to be sufficient here, because the proxy's edge check never
+  // touches the database. It no longer is: the CMS layout now calls the
+  // live /auth/session endpoint, which JwtAuthGuard rejects for any
+  // subject that doesn't resolve to a real, current-tokenVersion admin —
+  // so this test authenticates for real, through the API, against the
+  // browser context's shared cookie jar (`context.request` shares cookies
+  // with `page`), and checks the resulting session is honored end to end.
+  const loginResponse = await context.request.post('http://127.0.0.1:4000/api/v1/auth/login', {
+    headers: { origin: 'http://127.0.0.1:3000' },
+    data: { email: TEST_ADMIN_EMAIL, password: TEST_ADMIN_PASSWORD },
+  });
+  expect(loginResponse.ok()).toBe(true);
+
   await page.goto('/admin/dashboard');
   await expect(page).toHaveURL(/\/admin\/dashboard$/);
   await expect(page.getByRole('navigation', { name: 'Admin' })).toBeVisible();

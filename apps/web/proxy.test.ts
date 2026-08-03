@@ -17,9 +17,13 @@ async function token(
     expiresAt?: number | null;
     issuer?: string;
     audience?: string;
+    tokenVersion?: number | null;
   } = {},
 ) {
-  let builder = new SignJWT({ role: options.role ?? 'admin' })
+  let builder = new SignJWT({
+    role: options.role ?? 'admin',
+    ...(options.tokenVersion === null ? {} : { tokenVersion: options.tokenVersion ?? 0 }),
+  })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(options.subject ?? 'admin-1')
     .setIssuer(options.issuer ?? issuer)
@@ -83,6 +87,7 @@ describe('admin proxy JWT boundary', () => {
     ['wrong issuer', { issuer: 'forged-issuer' }],
     ['wrong audience', { audience: 'forged-audience' }],
     ['missing subject', { subject: '' }],
+    ['missing tokenVersion', { tokenVersion: null }],
   ])('redirects a token with %s', async (_label, claims) => {
     const { proxy } = await import('./proxy');
     expect((await proxy(request(await token(claims)))).status).toBe(307);
