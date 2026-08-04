@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Controller, Get, Headers, NotFoundException, Res } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -9,20 +9,19 @@ import { renderPrometheusText } from './registry';
 
 const METRICS_TOKEN_HEADER = 'x-metrics-token';
 
-/** Constant-time comparison — a naive `===`/`!==` on secrets leaks their length and a byte-by-byte
- * timing signal an attacker can use to brute-force the token character by character. Both inputs
- * are hashed to a fixed length first so `timingSafeEqual` (which throws on mismatched buffer
- * lengths) never itself becomes a length oracle. */
+/** Constant-time comparison — a naive `===`/`!==` on secrets leaks their length and a
+ * byte-by-byte timing signal an attacker can use to brute-force the token character by
+ * character. Genuinely fixed-length, not just "same-shaped": both inputs are hashed with SHA-256
+ * first (always a 32-byte digest, regardless of the input token's own length), so
+ * `timingSafeEqual` always compares two 32-byte buffers — there is no branch on the presented
+ * token's length anywhere in this function, and no length-derived control flow for an attacker's
+ * timing to correlate against. `'utf8'` is explicit: a raw byte comparison of a Unicode token
+ * would otherwise vary by encoding assumptions between the presented header value and the
+ * configured secret. */
 function safeTokenEquals(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) {
-    // Still do a same-shaped comparison (against itself) so this branch takes comparable time to
-    // the equal-length path, rather than returning immediately.
-    timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return timingSafeEqual(bufA, bufB);
+  const digestA = createHash('sha256').update(a, 'utf8').digest();
+  const digestB = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(digestA, digestB);
 }
 
 /**

@@ -90,6 +90,73 @@ describe('MetricsController', () => {
     );
   });
 
+  it('404s when the wrong token is shorter than the real one', async () => {
+    process.env.METRICS_ENABLED = 'true';
+    process.env.METRICS_TOKEN = 'a-real-metrics-token-value';
+    resetConfigCache();
+    const controller = new MetricsController(fakeHealthService());
+    await expect(controller.get('short', fakeRes() as never)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('404s when the wrong token is longer than the real one', async () => {
+    process.env.METRICS_ENABLED = 'true';
+    process.env.METRICS_TOKEN = 'a-real-metrics-token-value';
+    resetConfigCache();
+    const controller = new MetricsController(fakeHealthService());
+    const longerWrongToken = `a-real-metrics-token-value-plus-some-more-characters-appended`;
+    await expect(controller.get(longerWrongToken, fakeRes() as never)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('404s when the wrong token contains Unicode characters', async () => {
+    process.env.METRICS_ENABLED = 'true';
+    process.env.METRICS_TOKEN = 'a-real-metrics-token-value';
+    resetConfigCache();
+    const controller = new MetricsController(fakeHealthService());
+    await expect(
+      controller.get('a-réal-mëtrics-tökén-välüé-日本語', fakeRes() as never),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('accepts a Unicode token when it is the exact configured value', async () => {
+    process.env.METRICS_ENABLED = 'true';
+    process.env.METRICS_TOKEN = 'a-réal-mëtrics-tökén-välüé-日本語-and-long-enough';
+    resetConfigCache();
+    const controller = new MetricsController(fakeHealthService());
+    const res = fakeRes();
+    await controller.get('a-réal-mëtrics-tökén-välüé-日本語-and-long-enough', res as never);
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('never passes the token or its comparison result to any logging call', async () => {
+    process.env.METRICS_ENABLED = 'true';
+    process.env.METRICS_TOKEN = 'a-real-metrics-token-value';
+    resetConfigCache();
+    const logSpies = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'info').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+    try {
+      const controller = new MetricsController(fakeHealthService());
+      await controller.get('a-wrong-token-entirely', fakeRes() as never).catch(() => {});
+      await controller.get('a-real-metrics-token-value', fakeRes() as never);
+      for (const spy of logSpies) {
+        for (const call of spy.mock.calls) {
+          const serialized = call.map((arg) => String(arg)).join(' ');
+          expect(serialized).not.toContain('a-real-metrics-token-value');
+          expect(serialized).not.toContain('a-wrong-token-entirely');
+        }
+      }
+    } finally {
+      for (const spy of logSpies) spy.mockRestore();
+    }
+  });
+
   it('responds 200 with the correct token, using the plain-text Prometheus content type', async () => {
     process.env.METRICS_ENABLED = 'true';
     process.env.METRICS_TOKEN = 'a-real-metrics-token-value';
