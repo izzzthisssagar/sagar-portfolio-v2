@@ -27,8 +27,10 @@ trap cleanup EXIT
 
 fail() {
   echo "FAIL: $1" >&2
-  docker logs "$API" 2>&1 | tail -60 || true
-  docker logs "$WEB" 2>&1 | tail -60 || true
+  for container in "$PG" "$MINIO" "$MAILPIT" "$API" "$WEB"; do
+    echo "--- docker logs $container (last 60 lines) ---" >&2
+    docker logs "$container" 2>&1 | tail -60 || true
+  done
   exit 1
 }
 
@@ -48,11 +50,22 @@ docker run -d --name "$MINIO" --network "$NET" \
   "$MINIO_SERVER_IMAGE" server /data --console-address :9001 >/dev/null
 docker run -d --name "$MAILPIT" --network "$NET" "$MAILPIT_IMAGE" >/dev/null
 
-for i in $(seq 1 30); do
-  docker exec "$PG" pg_isready -U postgres >/dev/null 2>&1 && break
+# The official postgres image restarts itself once internally after its first-boot initdb (a
+# real, well-documented behavior of its docker-entrypoint), so `pg_isready` can flip
+# ready -> not-ready -> ready again in that window. A single successful check right as that
+# restart begins is not trustworthy — require 3 consecutive successful checks, 1s apart, before
+# treating postgres as actually, stably ready.
+consecutive_ready=0
+for i in $(seq 1 60); do
+  if docker exec "$PG" pg_isready -U postgres >/dev/null 2>&1; then
+    consecutive_ready=$((consecutive_ready + 1))
+    [ "$consecutive_ready" -ge 3 ] && break
+  else
+    consecutive_ready=0
+  fi
   sleep 1
 done
-docker exec "$PG" pg_isready -U postgres >/dev/null 2>&1 || fail "postgres did not become ready"
+[ "$consecutive_ready" -ge 3 ] || fail "postgres did not become stably ready"
 
 docker run --rm --network "$NET" --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
   mc alias set local http://${MINIO}:9000 minioadmin minioadmin &&

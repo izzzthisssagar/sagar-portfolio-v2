@@ -88,7 +88,13 @@ jobs:
       METRICS_ENABLED: 'true'
       METRICS_TOKEN: ci-only-metrics-token-value-32-characters-long
     steps:
+      # fetch-depth: 0 (full history), not the default shallow clone — pnpm secret-scan (gitleaks)
+      # scans full tracked git history, and .gitleaksignore's fingerprints are keyed by the real
+      # historical commit SHA each finding was introduced at. Against a shallow clone, gitleaks
+      # can only see the tip commit, so every fingerprint it computes mismatches the ignore file's
+      # recorded ones and previously-reviewed false positives resurface as new "leaks".
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
         with: { version: 11.18.0 }
       - uses: actions/setup-node@v4
