@@ -13,3 +13,5 @@ test-results/
 .DS_Store
 # Local media storage adapter default output (MEDIA_STORAGE_LOCAL_PATH) — dev/test uploads only.
 apps/api/.data/
+# pg_dump output (scripts/db-backup.sh) — real database backups must never be committed.
+backups/
