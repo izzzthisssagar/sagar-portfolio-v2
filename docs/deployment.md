@@ -40,12 +40,17 @@ deliberately buildable **without** a live backend:
   comment in `Dockerfile.api` for the exact mechanism) and excludes test files from the compiled
   output (`apps/api/tsconfig.build.json`).
 - The web image's build stage allows the static-content fallback (`ALLOW_STATIC_CONTENT_FALLBACK=true`,
-  scoped to that one `RUN` step only, never the runtime stage) purely so
-  `generateStaticParams` (`work/[slug]`, `notes/[slug]`) can enumerate a placeholder path set at
-  build time without depending on a live API — every page that uses this data fetches with
-  `next: { revalidate: 60 }`, so real content replaces the placeholder within 60 seconds of
-  traffic in any real deployment, and `dynamicParams` (default true) means a slug absent from the
-  placeholder set still renders correctly on demand.
+  scoped to that one `RUN` step only, never the runtime stage) because `/sitemap.xml`, `/work`,
+  and `/notes` are statically prerendered and fetch their listing data at build time, with no live
+  API reachable inside the Docker build — confirmed by actually building without it: `next build`
+  fails outright (`PublicContentUnavailableError` on `/sitemap.xml`). Every fetch in
+  `lib/public-content.server.ts` uses `next: { revalidate: 60 }`, so real content replaces the
+  placeholder within 60 seconds of traffic in any real deployment. `work/[slug]` and
+  `notes/[slug]` are unaffected by this flag either way — they have no `generateStaticParams` at
+  all, because they read the per-request CSP nonce (`headers()`), which Next.js does not allow
+  combining with static generation for the same route (see the comment in
+  `apps/web/app/work/[slug]/page.tsx` — found by actually building and serving a real production
+  build; the dev server every e2e/unit test runs against doesn't hit this path).
 - Both images ship a `HEALTHCHECK` (plain Node `fetch`, since the alpine base has neither `curl`
   nor `wget`) so orchestrators — and `docker-compose.staging.yml`'s
   `condition: service_healthy` dependency ordering — have something real to probe.

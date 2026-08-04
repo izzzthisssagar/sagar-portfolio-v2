@@ -37,16 +37,19 @@ ARG PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV PUBLIC_SITE_URL=${PUBLIC_SITE_URL}
 
-# `generateStaticParams` (work/[slug], notes/[slug]) calls the API at build time to enumerate
-# which slugs to pre-render — but the image build has no network path to a live API, and must
-# stay deterministic regardless of backend state. Allowing the static seed fallback ONLY for this
-# RUN step lets the build enumerate a placeholder path set without failing; it is not a runtime
-# correctness concern because every fetch in lib/public-content.server.ts uses
-# `next: { revalidate: 60 }`, so real data replaces the placeholder within 60s of traffic, and
-# `dynamicParams` defaults to true so slugs absent from the placeholder set still render
-# on-demand. This ENV is scoped to the `build` stage only — the `runtime` stage below starts a
-# fresh `FROM` and never sets it, so production requests always fail closed per
-# docs/security-production.md.
+# No live API is reachable at build time, and the build must stay deterministic regardless of
+# backend state. /sitemap.xml, /work, and /notes are statically prerendered (no dynamic route
+# segments, so no generateStaticParams involved) and fetch their listing data at build time —
+# without this, `next build` fails outright (confirmed by actually building with no API and no
+# fallback: PublicContentUnavailableError on /sitemap.xml). Allowing the static seed fallback
+# ONLY for this RUN step lets the build prerender placeholder content without failing; it is not
+# a runtime correctness concern because every fetch in lib/public-content.server.ts uses
+# `next: { revalidate: 60 }`, so real data replaces the placeholder within 60 seconds of traffic
+# in any real deployment. This ENV is scoped to the `build` stage only — the `runtime` stage
+# below starts a fresh `FROM` and never sets it, so production requests always fail closed per
+# docs/security-production.md. work/[slug] and notes/[slug] are unaffected either way — see the
+# comment in apps/web/app/work/[slug]/page.tsx for why those two specifically have no
+# generateStaticParams at all (a per-request CSP nonce, not build-time data availability).
 ENV ALLOW_STATIC_CONTENT_FALLBACK=true
 
 RUN pnpm --filter @portfolio/web run build
