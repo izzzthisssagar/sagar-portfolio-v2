@@ -77,7 +77,7 @@ echo "--- running database migrations against the smoke postgres ---"
 docker run --rm --network "$NET" \
   -e DATABASE_URL="postgresql://postgres:postgres@${PG}:5432/portfolio_smoke" \
   portfolio-api:smoke-migrate \
-  pnpm exec prisma migrate deploy >/dev/null || fail "database migration failed"
+  pnpm exec prisma migrate deploy || fail "database migration failed"
 
 docker run --rm --network "$NET" --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
   mc alias set local http://${MINIO}:9000 minioadmin minioadmin &&
