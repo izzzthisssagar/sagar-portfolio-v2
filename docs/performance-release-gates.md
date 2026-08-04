@@ -114,9 +114,23 @@ actually hit.
 
 ## CI
 
-Lighthouse is not currently wired into `.github/workflows/ci.yml` as an automated gate — running
-it requires a full production build + a real seeded database + a running standalone server, which
-is straightforward locally (see Methodology above) but adds meaningful CI runtime and another
-service dependency. Recorded here as a manual pre-release check for now; wiring an automated
-Lighthouse CI gate (with the budgets above enforced as thresholds) is a reasonable Sprint 5
-candidate once this baseline has been re-measured a few times and shown to be stable.
+`pnpm lighthouse:ci` (`scripts/lighthouse-ci.mjs`) is a real, automated gate wired into
+`.github/workflows/ci.yml`'s `verify` job, run after `pnpm test:e2e` against the same
+already-running, already-seeded API that job started earlier. It:
+
+- builds the web app in production mode (never `next dev`) if a standalone build isn't already
+  present, then copies `.next/static` and `public/` into the standalone output — exactly the
+  Methodology above, automated;
+- starts the real `output: 'standalone'` production server and waits for it to become reachable;
+- audits all six pages with a real headless Chrome (reusing the same Chromium binary
+  `pnpm exec playwright install --with-deps chromium` already installed for the e2e suite, via
+  `chrome-launcher` + `CHROME_PATH`);
+- enforces every budget in the table above per page, and fails the process (non-zero exit) on any
+  regression;
+- writes one full Lighthouse JSON report per page plus a machine-readable `summary.json` to
+  `lighthouse-results/` (gitignored locally; uploaded as a CI artifact on every run, pass or fail);
+- shuts down the standalone server (and Chrome) cleanly in a `finally` block regardless of outcome.
+
+The local baseline table above stays as the human-readable reference for _why_ each budget is set
+where it is; the CI gate is what actually enforces it on every pull request now, not a
+Sprint-5-deferred manual check.
