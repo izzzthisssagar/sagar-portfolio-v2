@@ -13,14 +13,27 @@
 //                                                         server's default "postgres" maintenance
 //                                                         database (needed for CREATE/DROP DATABASE,
 //                                                         which cannot run against the target db itself)
+//   node db-url.mjs libpq <DATABASE_URL>              -> prints the same connection, stripped of
+//                                                         Prisma-only query params, for direct use
+//                                                         by pg_dump/pg_restore/psql/createdb
 
 const [, , cmd, rawUrl, arg] = process.argv;
+
+// Prisma accepts `?schema=<name>` on DATABASE_URL to set its own default schema — this is a
+// Prisma-only convention, not a valid libpq connection parameter. Every real libpq tool
+// (pg_dump/pg_restore/psql/createdb) rejects it outright ("invalid URI query parameter: schema").
+// Stripped everywhere a connection string is built for one of those tools; harmless to strip
+// since none of those tools need it (they operate at the database level, not a single schema).
+function stripPrismaOnlyParams(u) {
+  u.searchParams.delete('schema');
+  return u;
+}
 
 function parse(url) {
   if (!url) {
     throw new Error('A DATABASE_URL argument is required.');
   }
-  const u = new URL(url);
+  const u = stripPrismaOnlyParams(new URL(url));
   if (!u.pathname || u.pathname === '/') {
     throw new Error('DATABASE_URL must include a database name.');
   }
@@ -51,6 +64,10 @@ try {
       const u = parse(rawUrl);
       u.pathname = '/postgres';
       process.stdout.write(u.toString());
+      break;
+    }
+    case 'libpq': {
+      process.stdout.write(parse(rawUrl).toString());
       break;
     }
     default:

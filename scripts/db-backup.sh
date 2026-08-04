@@ -4,8 +4,9 @@
 # built-in compression (vs. plain-SQL -Fp). See docs/backup-restore.md.
 #
 # Never prints the database password: pg_dump is given the full connection string directly
-# ($DATABASE_URL, unmodified) rather than having this script split it apart and echo the pieces.
-# Only a credential-free "redacted" form (host/port/db) is ever printed.
+# (via scripts/lib/db-url.mjs, which only strips Prisma-only query params — never splits the URL
+# apart or echoes its pieces). Only a credential-free "redacted" form (host/port/db) is ever
+# printed.
 #
 # Contract for callers (e.g. scripts/backup-restore-rehearsal.sh): the last line of stdout is
 # always `RESULT_BACKUP_FILE=<path>`.
@@ -26,7 +27,10 @@ OUTPUT="$BACKUP_DIR/sagar-portfolio-${TIMESTAMP}.dump"
 REDACTED="$(node "$DB_URL_HELPER" redact "$DATABASE_URL")"
 echo "--- backing up $REDACTED ---"
 
-pg_dump "$DATABASE_URL" -Fc --no-password -f "$OUTPUT"
+# libpq (not raw $DATABASE_URL): strips Prisma-only query params (e.g. ?schema=public) that
+# pg_dump rejects outright ("invalid URI query parameter") but Prisma itself relies on.
+LIBPQ_URL="$(node "$DB_URL_HELPER" libpq "$DATABASE_URL")"
+pg_dump "$LIBPQ_URL" -Fc --no-password -f "$OUTPUT"
 
 SIZE="$(du -h "$OUTPUT" | cut -f1 | tr -d '[:space:]')"
 echo "Backup written: $OUTPUT ($SIZE)"
