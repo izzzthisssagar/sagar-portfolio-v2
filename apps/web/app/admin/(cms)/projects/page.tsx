@@ -54,36 +54,38 @@ export default async function ProjectsPage({
         <p>No projects match these filters yet.</p>
       ) : (
         <>
-          <table className="project-table">
-            <thead>
-              <tr>
-                <th scope="col">Title</th>
-                <th scope="col">Slug</th>
-                <th scope="col">Status</th>
-                <th scope="col">Order</th>
-                <th scope="col">Updated</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.map((project) => (
-                <tr key={project.id}>
-                  <td>{project.title}</td>
-                  <td>{project.slug}</td>
-                  <td>
-                    <span className={`status-badge status-badge--${project.status}`}>
-                      {STATUS_LABELS[project.status] ?? project.status}
-                    </span>
-                  </td>
-                  <td>{project.order}</td>
-                  <td>{new Date(project.updatedAt).toLocaleDateString()}</td>
-                  <td>
-                    <ProjectRowActions project={project} />
-                  </td>
+          <div className="table-scroll" role="region" aria-label="Projects" tabIndex={0}>
+            <table className="project-table">
+              <thead>
+                <tr>
+                  <th scope="col">Title</th>
+                  <th scope="col">Slug</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Order</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {result.data.map((project) => (
+                  <tr key={project.id}>
+                    <td>{project.title}</td>
+                    <td>{project.slug}</td>
+                    <td>
+                      <span className={`status-badge status-badge--${project.status}`}>
+                        {STATUS_LABELS[project.status] ?? project.status}
+                      </span>
+                    </td>
+                    <td>{project.order}</td>
+                    <td>{new Date(project.updatedAt).toLocaleDateString()}</td>
+                    <td>
+                      <ProjectRowActions project={project} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <nav aria-label="Project pagination" className="pagination">
             {page > 1 && <Link href={pageHref(page - 1)}>PREVIOUS</Link>}
             <span>

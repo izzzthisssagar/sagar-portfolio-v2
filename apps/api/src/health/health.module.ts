@@ -1,0 +1,12 @@
+import { Module } from '@nestjs/common';
+import { StorageModule } from '../media/storage/storage.module';
+import { HealthController } from './health.controller';
+import { HealthService } from './health.service';
+
+@Module({
+  imports: [StorageModule],
+  controllers: [HealthController],
+  providers: [HealthService],
+  exports: [HealthService],
+})
+export class HealthModule {}

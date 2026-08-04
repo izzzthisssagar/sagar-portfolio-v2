@@ -74,7 +74,7 @@ databaseSuite('Contact messages: submission, honeypot, delivery tracking, admin 
     expect(stored).not.toBeNull();
     expect(stored?.status).toBe('NEW');
     expect(stored?.deliveryAttempts).toHaveLength(1);
-    expect(stored?.deliveryAttempts[0]?.success).toBe(true);
+    expect(stored?.deliveryAttempts[0]?.status).toBe('SUCCEEDED');
   });
 
   it('accepts a honeypot-tripped submission with the same generic response but never persists it', async () => {
@@ -136,5 +136,145 @@ databaseSuite('Contact messages: submission, honeypot, delivery tracking, admin 
       })
     ).map((row) => row.action);
     expect(actions).toEqual(['CONTACT_MESSAGE_STATUS_CHANGED', 'CONTACT_MESSAGE_DELETED']);
+  });
+
+  it('retries notification delivery, records a new attempt, and audits the retry', async () => {
+    const email = `${testEmailPrefix}retry@example.invalid`;
+    await request(server())
+      .post('/api/v1/contact')
+      .send({ name: 'Retry Subject', email, message: 'Message needing a retry.' })
+      .expect(200);
+    const created = await prisma.contactMessage.findFirstOrThrow({ where: { email } });
+    const before = await prisma.contactDeliveryAttempt.count({
+      where: { contactMessageId: created.id },
+    });
+
+    const response = await request(server())
+      .post(`/api/v1/admin/messages/${created.id}/retry-notification`)
+      .set(auth())
+      .expect(200);
+    expect(response.body.data.deliveryAttempts.length).toBeGreaterThan(0);
+
+    const after = await prisma.contactDeliveryAttempt.count({
+      where: { contactMessageId: created.id },
+    });
+    expect(after).toBe(before + 1);
+
+    const stored = await prisma.contactMessage.findUniqueOrThrow({ where: { id: created.id } });
+    expect(stored.retryClaimedAt).toBeNull(); // claim released after completion
+
+    const actions = (
+      await prisma.auditLog.findMany({
+        where: { resourceId: created.id, action: 'CONTACT_MESSAGE_NOTIFICATION_RETRIED' },
+      })
+    ).map((row) => row.action);
+    expect(actions).toEqual(['CONTACT_MESSAGE_NOTIFICATION_RETRIED']);
+  });
+
+  it('the atomic claim query lets only one of two truly concurrent claims win (Postgres row-level locking)', async () => {
+    // Exercises the exact conditional UPDATE ContactService.retryNotification uses, directly and
+    // concurrently — not through the full HTTP request/notifier round trip. The end-to-end 200
+    // vs. 409 behavior is covered by the next two tests; the fake notifier used in this test
+    // environment resolves near-instantly, which closes the real in-flight window before a
+    // second HTTP request can reliably land inside it, so asserting the race through the full
+    // stack would be a timing-dependent (flaky) test of the wrong thing. This is a deterministic
+    // test of the actual mechanism: two genuinely concurrent claim attempts, exactly one wins.
+    const email = `${testEmailPrefix}retry-atomic-claim@example.invalid`;
+    await request(server())
+      .post('/api/v1/contact')
+      .send({ name: 'Atomic Claim', email, message: 'Message for the atomic-claim test.' })
+      .expect(200);
+    const created = await prisma.contactMessage.findFirstOrThrow({ where: { email } });
+
+    const claim = () =>
+      prisma.contactMessage.updateMany({
+        where: {
+          id: created.id,
+          OR: [
+            { retryClaimedAt: null },
+            { retryClaimedAt: { lt: new Date(Date.now() - 120_000) } },
+          ],
+        },
+        data: { retryClaimedAt: new Date() },
+      });
+    const [a, b] = await Promise.all([claim(), claim()]);
+    expect([a.count, b.count].sort()).toEqual([0, 1]);
+  });
+
+  it('the retry endpoint returns 409 RETRY_IN_PROGRESS when a claim is already held', async () => {
+    const email = `${testEmailPrefix}retry-already-claimed@example.invalid`;
+    await request(server())
+      .post('/api/v1/contact')
+      .send({ name: 'Already Claimed', email, message: 'Message for the held-claim test.' })
+      .expect(200);
+    const created = await prisma.contactMessage.findFirstOrThrow({ where: { email } });
+    await prisma.contactMessage.update({
+      where: { id: created.id },
+      data: { retryClaimedAt: new Date() }, // simulates another retry already in flight
+    });
+
+    const response = await request(server())
+      .post(`/api/v1/admin/messages/${created.id}/retry-notification`)
+      .set(auth())
+      .expect(409);
+    expect(response.body.error.code).toBe('RETRY_IN_PROGRESS');
+  });
+
+  it('a claim older than the reclaim TTL is treated as abandoned and can be retried', async () => {
+    const email = `${testEmailPrefix}retry-stale-claim@example.invalid`;
+    await request(server())
+      .post('/api/v1/contact')
+      .send({ name: 'Stale Claim', email, message: 'Message for the stale-claim test.' })
+      .expect(200);
+    const created = await prisma.contactMessage.findFirstOrThrow({ where: { email } });
+    await prisma.contactMessage.update({
+      where: { id: created.id },
+      // Older than RETRY_CLAIM_TTL_MS (2 minutes) — simulates a process that crashed mid-attempt.
+      data: { retryClaimedAt: new Date(Date.now() - 5 * 60 * 1000) },
+    });
+
+    await request(server())
+      .post(`/api/v1/admin/messages/${created.id}/retry-notification`)
+      .set(auth())
+      .expect(200);
+  });
+
+  it('refuses to retry a message that has already reached the delivery-attempt cap', async () => {
+    const email = `${testEmailPrefix}retry-cap@example.invalid`;
+    await request(server())
+      .post('/api/v1/contact')
+      .send({ name: 'Retry Cap', email, message: 'Message hitting the retry cap.' })
+      .expect(200);
+    const created = await prisma.contactMessage.findFirstOrThrow({ where: { email } });
+    // Fast-forward past the cap directly — MAX_DELIVERY_ATTEMPTS (5) in contact.service.ts — the
+    // real submit-time attempt(s) plus manual retries share the same counter. attemptNumber
+    // continues on from whatever submit() above already created (real ContactDeliveryAttempt
+    // rows, not a fixture) — @@unique([contactMessageId, attemptNumber]) requires each fixture
+    // row to have its own number, not just a matching count.
+    const existingMax = await prisma.contactDeliveryAttempt.aggregate({
+      where: { contactMessageId: created.id },
+      _max: { attemptNumber: true },
+    });
+    const startAt = (existingMax._max.attemptNumber ?? 0) + 1;
+    await prisma.contactDeliveryAttempt.createMany({
+      data: Array.from({ length: 5 }, (_, i) => ({
+        contactMessageId: created.id,
+        attemptNumber: startAt + i,
+        status: 'FAILED',
+        reason: 'fixture',
+      })),
+    });
+
+    const response = await request(server())
+      .post(`/api/v1/admin/messages/${created.id}/retry-notification`)
+      .set(auth())
+      .expect(409);
+    expect(response.body.error.code).toBe('RETRY_LIMIT_REACHED');
+  });
+
+  it('rejects retry-notification without a token', async () => {
+    await request(server())
+      .post('/api/v1/admin/messages/nonexistent-id/retry-notification')
+      .expect(401);
   });
 });

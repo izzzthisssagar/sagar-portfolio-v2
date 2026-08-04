@@ -46,9 +46,11 @@ export default async function MessageDetailPage({ params }: { params: Promise<{ 
             {message.deliveryAttempts.map((attempt) => (
               <li key={attempt.id}>
                 {new Date(attempt.createdAt).toLocaleString()} —{' '}
-                {attempt.success
+                {attempt.status === 'SUCCEEDED'
                   ? 'delivered'
-                  : `failed${attempt.reason ? `: ${attempt.reason}` : ''}`}
+                  : attempt.status === 'PENDING'
+                    ? 'pending'
+                    : `failed${attempt.reason ? `: ${attempt.reason}` : ''}`}
               </li>
             ))}
           </ul>

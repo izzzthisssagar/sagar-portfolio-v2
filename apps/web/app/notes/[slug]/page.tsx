@@ -1,13 +1,15 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { renderMarkdown } from '@/lib/markdown';
-import { getPublishedPostBySlug, getPublishedPosts } from '@/lib/public-content.server';
+import { getNonce } from '@/lib/nonce.server';
+import { getPublishedPostBySlug } from '@/lib/public-content.server';
 import { articleJsonLd, JsonLd } from '@/lib/seo';
 
-export async function generateStaticParams() {
-  const notes = await getPublishedPosts();
-  return notes.map(({ slug }) => ({ slug }));
-}
+// Deliberately no generateStaticParams here — see the matching comment in
+// app/work/[slug]/page.tsx: this page reads the per-request CSP nonce (getNonce() ->
+// headers()), which Next.js does not allow combining with static generation for the same
+// route (DYNAMIC_SERVER_USAGE at request time, found by actually running a production build).
+// getPublishedPostBySlug still caches via `next: { revalidate: 60 }`.
 
 export async function generateMetadata({
   params,
@@ -38,11 +40,11 @@ export async function generateMetadata({
 
 export default async function Note({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const note = await getPublishedPostBySlug(slug);
+  const [note, nonce] = await Promise.all([getPublishedPostBySlug(slug), getNonce()]);
   if (!note) notFound();
   return (
     <main id="main" className="page-shell">
-      <JsonLd data={articleJsonLd(note)} />
+      <JsonLd data={articleJsonLd(note)} nonce={nonce} />
       <article className="container">
         <p className="eyebrow">Field Notes / {note.readingTime} min</p>
         <h1 className="display">{note.title}</h1>

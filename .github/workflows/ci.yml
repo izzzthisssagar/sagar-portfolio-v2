@@ -8,10 +8,12 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     services:
+      # Pinned tag@digest — see scripts/lib/pinned-images.sh, the single source of truth shared
+      # with docker-compose.staging.yml and scripts/container-smoke.sh.
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
         env:
           POSTGRES_DB: sagar_portfolio_test
           POSTGRES_USER: portfolio
@@ -22,6 +24,11 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Real SMTP protocol testing (Phase 11) — never a mock. axllent/mailpit needs no command or
+      # extra config to start; 1025 is SMTP, 8025 is the inspection API/UI.
+      mailpit:
+        image: axllent/mailpit:v1.30.6@sha256:7f33095f80e901f6ad08028f06ca284aa58fe84942be5496008d041d3b9f4d4d
+        ports: ['1025:1025', '8025:8025']
     env:
       DATABASE_URL: postgresql://portfolio:ci-only-password@localhost:5432/sagar_portfolio_test?schema=public
       ACCESS_TOKEN_SECRET: ci-only-access-token-secret-at-least-32-chars
@@ -48,20 +55,108 @@ jobs:
       # Explicit and off — CI must fail visibly on a broken API/content
       # seed rather than silently rendering static fallback project pages.
       ALLOW_STATIC_CONTENT_FALLBACK: 'false'
+      # Real MinIO protocol testing (s3-storage.adapter.integration.test.ts, gated on this exact
+      # var — see docs/media-pipeline.md). Deliberately NOT MEDIA_STORAGE_DRIVER=s3 at job scope:
+      # that would switch every other step (build, e2e) onto the S3 adapter too, which isn't what
+      # this job's non-storage-suite steps need or expect (they're unaffected either way, since
+      # the driver switch only reads MEDIA_STORAGE_DRIVER, but keeping it unset here keeps the
+      # blast radius of this change to exactly the suite that's gated on the endpoint var).
+      MEDIA_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      MEDIA_STORAGE_REGION: us-east-1
+      MEDIA_STORAGE_BUCKET: portfolio-media-test
+      MEDIA_STORAGE_ACCESS_KEY: minioadmin
+      MEDIA_STORAGE_SECRET_KEY: minioadmin
+      # Real Mailpit protocol testing (smtp-notification.adapter.integration.test.ts, gated on
+      # MAILPIT_API_URL — see docs/contact-delivery.md).
+      MAILPIT_API_URL: http://127.0.0.1:8025
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: '1025'
+      SMTP_USERNAME: mailpit
+      SMTP_PASSWORD: mailpit
+      # E2E-only global rate-limit override (apps/api/src/app.module.ts's globalRateLimit()) —
+      # measured suite volume is ~300 requests total; 2000 keeps ~6x headroom. Never affects the
+      # strict per-route budgets (login/refresh/contact/media-upload), see
+      # apps/api/test/rate-limit-e2e-override.api.integration.test.ts and
+      # docs/performance-release-gates.md / playwright.config.ts for the full rationale.
+      RATE_LIMIT_MAX: '2000'
+      # CI deliberately pre-starts the API (see "Start the API server" below) ahead of `pnpm
+      # build`, then Playwright attaches to that same already-running, already-seeded process
+      # instead of spawning its own — see playwright.config.ts.
+      E2E_REUSE_API_SERVER: 'true'
+      # CI-only metrics token, used by the "Metrics endpoint smoke check" step below. Not a
+      # production secret — this process is disposed of at the end of the job.
+      METRICS_ENABLED: 'true'
+      METRICS_TOKEN: ci-only-metrics-token-value-32-characters-long
     steps:
+      # fetch-depth: 0 (full history), not the default shallow clone — pnpm secret-scan (gitleaks)
+      # scans full tracked git history, and .gitleaksignore's fingerprints are keyed by the real
+      # historical commit SHA each finding was introduced at. Against a shallow clone, gitleaks
+      # can only see the tip commit, so every fingerprint it computes mismatches the ignore file's
+      # recorded ones and previously-reviewed false positives resurface as new "leaks".
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
         with: { version: 11.18.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - name: Pin-image preflight (postgres, minio, mc, mailpit all pullable)
+        run: pnpm images:preflight
+      # A normal step, not a GitHub Actions `services:` container — `services:` has no syntax to
+      # supply MinIO's required `server /data --console-address :9001` command.
+      - name: Start MinIO
+        run: |
+          # shellcheck source=scripts/lib/pinned-images.sh
+          source scripts/lib/pinned-images.sh
+          docker run -d --name ci-minio -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            "$MINIO_SERVER_IMAGE" server /data --console-address :9001
+      - name: Wait for MinIO to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live > /dev/null && exit 0
+            sleep 1
+          done
+          echo "MinIO did not become healthy within 30s" >&2
+          exit 1
+      - name: Create and verify the CI MinIO bucket
+        run: |
+          # shellcheck source=scripts/lib/pinned-images.sh
+          source scripts/lib/pinned-images.sh
+          docker run --rm --network host --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
+            mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin &&
+            mc mb --ignore-existing ci/portfolio-media-test &&
+            mc ls ci/portfolio-media-test > /dev/null
+          "
+      - name: Wait for Mailpit to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8025/api/v1/messages > /dev/null && exit 0
+            sleep 1
+          done
+          echo "Mailpit did not become healthy within 30s" >&2
+          exit 1
       - run: pnpm exec prisma generate
       - run: pnpm exec prisma validate
       - run: pnpm exec prisma migrate deploy
+      - name: Validate runtime configuration (pnpm config:check)
+        run: pnpm config:check
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      # Runs the full unit/integration suite, including the real MinIO and Mailpit protocol
+      # suites (self-skip locally without MEDIA_STORAGE_ENDPOINT/MAILPIT_API_URL — required here).
       - run: pnpm test
+      - name: Install gitleaks
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          sudo tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Secret scan (gitleaks against full tracked git history)
+        run: pnpm secret-scan
+      - name: Dependency audit (high/critical only fails the build)
+        run: pnpm dependency-audit
       - name: Provision a disposable test administrator
         run: pnpm admin:create
       - name: Confirm administrator provisioning refuses a duplicate
@@ -87,22 +182,20 @@ jobs:
       # page, /work, and /work/[slug]'s generateStaticParams) now needs a
       # real, reachable API instead of silently degrading to fallback
       # content — exactly the behavior this sprint set out to require.
-      # Playwright's webServer config (`reuseExistingServer: true`) detects
-      # and reuses this same already-running server later for `test:e2e`.
+      # Playwright's webServer config (`E2E_REUSE_API_SERVER=true`, job env
+      # above) detects and reuses this same already-running server later for
+      # `test:e2e`, and the Lighthouse gate reuses it again after that.
+      # Output redirected to a file so it can be uploaded as a safe debugging
+      # artifact if a later step fails (see the failure-artifact step below)
+      # — this app's structured logger never logs secrets/passwords/tokens.
       - name: Start the API server
-        run: pnpm --filter @portfolio/api exec nest start &
+        run: pnpm --filter @portfolio/api exec nest start > api-server.log 2>&1 &
         env:
           API_URL: http://127.0.0.1:4000
-          # Raises only this CI instance's app-wide rate-limit budget (production default,
-          # apps/api/src/app.module.ts, stays 60 req/60s/IP) — the sequential 25-spec Playwright
-          # suite that reuses this same server can exceed 60 of its own necessary request volume
-          # within a single 60s window on its own; see docs/sprint-3.md "Known limitations" and
-          # playwright.config.ts.
-          RATE_LIMIT_MAX: '300'
       - name: Wait for the API to become healthy
         run: |
           for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:4000/api/v1/health > /dev/null; then
+            if curl -sf http://127.0.0.1:4000/api/v1/health/live > /dev/null; then
               echo "API is healthy"
               exit 0
             fi
@@ -121,6 +214,8 @@ jobs:
             }
             console.log("OK - qa-mastery served from DB record", data.id);
           ' "$body"
+      - name: Metrics endpoint smoke check (disabled/wrong-token refusal, correct-token exposition)
+        run: pnpm metrics:smoke -- --api-base-url=http://127.0.0.1:4000 --token="$METRICS_TOKEN"
       - run: pnpm build
         env:
           API_URL: http://127.0.0.1:4000
@@ -129,7 +224,90 @@ jobs:
       # fails loudly if it doesn't land, and the smoke suite asserts
       # GET /api/v1/projects/qa-mastery returns the real database record
       # (not apps/web/lib/content.ts static fallback) — see tests/e2e/smoke.spec.ts.
-      - run: pnpm test:e2e
-      - run: pnpm audit --audit-level high
+      # 61 specs, deterministically 61/61 — see docs/sprint-4.md "E2E rate-limit headroom" for how
+      # the earlier flaky-login/table-overflow failures were actually root-caused and fixed (not
+      # retried around).
+      - name: Playwright end-to-end suite (61 specs)
+        run: pnpm test:e2e
+      - name: Upload Playwright report and traces (on failure only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+            api-server.log
+          retention-days: 7
+      # Runs after the e2e suite (not before): it seeds content and adds disposable fixture rows
+      # to the shared CI database (docs/backup-restore.md) that are never cleaned up afterward —
+      # placing it earlier previously left a stray "active" CvDocument fixture in the database
+      # that broke an unrelated CV-not-configured assertion (found by actually running this
+      # rehearsal against a real database while building it). The Lighthouse gate below reuses
+      # this same already-running, already-seeded API afterward, so it also needs to run after
+      # this step rather than before.
+      # postgresql-client (no version suffix) resolves to v16 on this runner image, but pg_dump
+      # refuses to dump from a *newer* major-version server than itself ("aborting because of
+      # server version mismatch") — and the postgres service above is pinned to 17-alpine.
+      # postgresql-client-17 isn't in the runner's default apt sources (only unversioned
+      # postgresql-client, which resolves to v16) — add the official PostgreSQL apt repository
+      # first, using its own documented setup script.
+      - name: Install postgresql-client-17 (pg_dump/pg_restore/createdb for the backup rehearsal)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          # The runner's pre-existing unversioned `postgresql-client` (v16) stays installed
+          # alongside this one, and Debian's postgresql-common alternatives keep the
+          # already-installed version as the unversioned `pg_dump`/`pg_restore`/`createdb`
+          # default — installing v17 alone doesn't switch it. Prepend v17's own bin directory to
+          # PATH (via GITHUB_PATH, so it applies to every later step, not just this one) so it's
+          # what actually resolves, matching the postgres:17-alpine server above.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - name: PostgreSQL backup/restore rehearsal
+        run: pnpm db:backup-restore-rehearsal
+      # Real production build (never `next dev`), real seeded database, the actual standalone
+      # server — see docs/performance-release-gates.md. Reuses the `pnpm build` output from
+      # earlier in this same job (LIGHTHOUSE_SKIP_BUILD — that build never got exercised since
+      # the e2e suite above runs against the dev server, not this one) and the Chromium installed
+      # above for the e2e suite.
+      - name: Lighthouse CI gate (6 pages, budgets in docs/performance-release-gates.md)
+        run: pnpm lighthouse:ci
+        env:
+          API_URL: http://127.0.0.1:4000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+          PUBLIC_SITE_URL: http://127.0.0.1:3000
+          LIGHTHOUSE_SKIP_BUILD: 'true'
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: lighthouse-results/
+          retention-days: 7
       - name: Tracked .env file check
         run: test -f .env.example && ! git ls-files | grep -E '(^|/)\.env$'
+      - name: Clean up the CI MinIO container
+        if: always()
+        run: docker rm -f ci-minio >/dev/null 2>&1 || true
+
+  # Independent of `verify` on purpose (no `needs:`) — a broken lint rule or a flaky unit test
+  # must never hide a broken production image build. This job runs on every pull request
+  # regardless of whether `verify` passes, so GitHub always has separate evidence for application
+  # verification (the job above) vs. production image builds/startup/dependency health/graceful
+  # shutdown (this job) — see scripts/container-smoke.sh. The overall workflow still shows
+  # red if either job fails; only the evidence stays independent.
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin-image preflight (postgres, minio, mc, mailpit all pullable)
+        run: bash scripts/image-preflight.sh
+      # scripts/container-smoke.sh is fully self-contained — it builds both production images
+      # and spins up its own disposable PostgreSQL/MinIO/Mailpit containers via `docker run`
+      # (never the GitHub Actions `services:` block), so this job needs nothing but Docker,
+      # which ubuntu-latest runners already provide.
+      - name: Build and smoke-test the production containers
+        run: bash scripts/container-smoke.sh

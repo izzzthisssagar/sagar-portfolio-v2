@@ -320,22 +320,48 @@ model ContactMessage {
   consentAt        DateTime
   createdAt        DateTime                 @default(now())
   ipHash           String?
+  /// Set when a retry is claimed via POST /admin/messages/:id/retry-notification, cleared on
+  /// completion. An atomic conditional UPDATE on this column is the claim mechanism, so two
+  /// concurrent retry requests for the same message can never both send. See
+  /// docs/contact-delivery.md.
+  retryClaimedAt   DateTime?
   deliveryAttempts ContactDeliveryAttempt[]
 
   @@index([status, createdAt])
   @@index([email, createdAt])
 }
 
-/// One row per notification-delivery attempt for a ContactMessage — never the message body or
-/// any personal data, only outcome. See docs/contact-delivery.md.
-model ContactDeliveryAttempt {
-  id               String         @id @default(cuid())
-  contactMessageId String
-  contactMessage   ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
-  success          Boolean
-  reason           String?
-  createdAt        DateTime       @default(now())
+enum ContactDeliveryAttemptStatus {
+  /// Reserved before the real SMTP send is invoked — a slot has been durably claimed, but the
+  /// outcome isn't known/persisted yet. A row stuck PENDING (the finalize write itself failed)
+  /// still counts against MAX_DELIVERY_ATTEMPTS and is never automatically resent; it requires
+  /// manual reconciliation, not a blind retry (see contact.service.ts).
+  PENDING
+  SUCCEEDED
+  FAILED
+}
 
+/// One row per notification-delivery attempt for a ContactMessage — never the message body or
+/// any personal data, only outcome. One row per real ContactNotificationAdapter.send() call,
+/// always — never one row summarizing several sends (see docs/contact-delivery.md).
+/// attemptNumber is monotonically increasing per ContactMessage, starting at 1; the
+/// @@unique constraint is the database-enforced backstop against two concurrent allocations
+/// ever landing on the same number (application code also serializes real sends via
+/// ContactMessage.retryClaimedAt for manual retries).
+/// The row is created with status=PENDING *before* the real send happens (reserveAttempt) and
+/// updated to SUCCEEDED/FAILED afterward (finalizeAttempt) — a real send can never occur without
+/// an already-persisted row claiming its slot, so MAX_DELIVERY_ATTEMPTS is enforced against real
+/// sends even if the finalize write itself fails.
+model ContactDeliveryAttempt {
+  id               String                       @id @default(cuid())
+  contactMessageId String
+  contactMessage   ContactMessage               @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+  attemptNumber    Int
+  status           ContactDeliveryAttemptStatus @default(PENDING)
+  reason           String?
+  createdAt        DateTime                     @default(now())
+
+  @@unique([contactMessageId, attemptNumber])
   @@index([contactMessageId])
 }
 

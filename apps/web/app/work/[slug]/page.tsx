@@ -1,12 +1,19 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPublishedProjectBySlug, getPublishedProjects } from '@/lib/public-content.server';
+import { getNonce } from '@/lib/nonce.server';
+import { getPublishedProjectBySlug } from '@/lib/public-content.server';
 import { creativeWorkJsonLd, JsonLd } from '@/lib/seo';
 
-export async function generateStaticParams() {
-  const projects = await getPublishedProjects();
-  return projects.map(({ slug }) => ({ slug }));
-}
+// Deliberately no generateStaticParams here: this page reads the per-request CSP nonce
+// (getNonce() -> headers()) so JsonLd's inline <script> matches the response's own
+// Content-Security-Policy — a real per-request value, not a build-time-baked one reused across
+// every visitor. Next.js does not allow combining a dynamic API like headers() with static
+// generation for the same route (it throws DYNAMIC_SERVER_USAGE at request time rather than
+// silently caching a stale/shared nonce) — found by actually running a production build and
+// requesting this route, which apps/web's dev-server-backed e2e/unit tests never exercise. The
+// underlying data fetch (getPublishedProjectBySlug) still caches via `next: { revalidate: 60 }`
+// (public-content.server.ts), so this only trades pre-built HTML for a fast per-request render
+// over already-cached data — not a full return to uncached rendering.
 
 export async function generateMetadata({
   params,
@@ -51,12 +58,12 @@ const SECTIONS = [
 
 export default async function CaseStudy({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const project = await getPublishedProjectBySlug(slug);
+  const [project, nonce] = await Promise.all([getPublishedProjectBySlug(slug), getNonce()]);
   if (!project) notFound();
 
   return (
     <main id="main" className="page-shell">
-      <JsonLd data={creativeWorkJsonLd(project)} />
+      <JsonLd data={creativeWorkJsonLd(project)} nonce={nonce} />
       <article className="container">
         <p className="eyebrow">Project / {project.status}</p>
         <h1 className="display">{project.title}</h1>

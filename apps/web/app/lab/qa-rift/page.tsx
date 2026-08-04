@@ -1,3 +1,9 @@
+// Forced dynamic — see the matching comment in apps/web/app/work/page.tsx: a per-request CSP
+// nonce (proxy.ts) only reaches Next's own framework-injected inline scripts on dynamically
+// rendered pages; a statically prerendered one bakes in a build-time nonce that never matches
+// the real per-request CSP header, and CSP-enforcing browsers block those scripts outright.
+export const dynamic = 'force-dynamic';
+
 export default function Rift() {
   return (
     <main id="main" className="page-shell rift">

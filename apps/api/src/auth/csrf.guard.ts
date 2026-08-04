@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
+import { getConfig } from '../config';
 import { CSRF_TOKEN_COOKIE } from './cookies';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -33,12 +34,24 @@ function rejectToken(): never {
   });
 }
 
+/**
+ * Reads the *validated* configuration layer (`getConfig()`), never `process.env` directly — by
+ * the time this guard runs, WEB_URL/API_URL have already gone through schema validation
+ * (malformed URLs rejected) and, in production specifically, a fail-closed presence check (see
+ * config/index.ts's `productionOnlyErrors`): production can never boot with either unset, so both
+ * checks below are unconditionally active there. WEB_URL always has a value (a documented
+ * `http://localhost:3000` development default when unset, matching Sprint 3 behavior); API_URL
+ * stays genuinely optional outside production specifically so an in-process Supertest integration
+ * test — whose ephemeral, OS-assigned port is never actually bound to any configured API_URL —
+ * doesn't get Host-rejected for not pretending to be that host.
+ */
 function validateOrigin(request: Request) {
-  const expectedOrigin = process.env.WEB_URL ?? 'http://localhost:3000';
+  const config = getConfig();
+  const expectedOrigin = config.WEB_URL;
   const origin = request.headers.origin;
   if (origin && origin !== expectedOrigin) rejectOrigin();
 
-  const apiUrl = process.env.API_URL;
+  const apiUrl = config.API_URL;
   if (apiUrl) {
     const expectedHost = new URL(apiUrl).host;
     const actualHost = request.headers.host;

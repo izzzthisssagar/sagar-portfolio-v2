@@ -210,7 +210,12 @@ databaseSuite('Dashboard: live operational counts', () => {
       },
     });
     await prisma.contactDeliveryAttempt.create({
-      data: { contactMessageId: message.id, success: false, reason: 'SMTP fixture failure.' },
+      data: {
+        contactMessageId: message.id,
+        attemptNumber: 1,
+        status: 'FAILED',
+        reason: 'SMTP fixture failure.',
+      },
     });
     const after = await summary();
     expect(after.failedNotifications - before.failedNotifications).toBe(1);

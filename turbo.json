@@ -12,7 +12,23 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"],
-      "env": ["DATABASE_URL", "ACCESS_TOKEN_SECRET", "ACCESS_TOKEN_ISSUER", "ACCESS_TOKEN_AUDIENCE"]
+      "env": [
+        "DATABASE_URL",
+        "ACCESS_TOKEN_SECRET",
+        "ACCESS_TOKEN_ISSUER",
+        "ACCESS_TOKEN_AUDIENCE",
+        "REFRESH_TOKEN_SECRET",
+        "MEDIA_STORAGE_ENDPOINT",
+        "MEDIA_STORAGE_REGION",
+        "MEDIA_STORAGE_BUCKET",
+        "MEDIA_STORAGE_ACCESS_KEY",
+        "MEDIA_STORAGE_SECRET_KEY",
+        "MAILPIT_API_URL",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD"
+      ]
     }
   }
 }

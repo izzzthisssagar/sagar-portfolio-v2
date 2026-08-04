@@ -2,6 +2,9 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -68,5 +71,43 @@ export class S3StorageAdapter implements MediaStorageAdapter {
   publicUrl(key: string): string | null {
     if (!this.publicBaseUrl || !key.startsWith('approved/')) return null;
     return `${this.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+  }
+
+  async ping(): Promise<{ ok: boolean; detail?: string }> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      return { ok: true };
+    } catch {
+      // Never surfaces the underlying error (may include endpoint/credentials context) — the
+      // readiness probe reports only "storage unavailable", never infrastructure detail.
+      return { ok: false, detail: 'storage endpoint unavailable' };
+    }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    try {
+      await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async list(): Promise<string[]> {
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const result = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          ContinuationToken: continuationToken,
+        }),
+      );
+      for (const object of result.Contents ?? []) {
+        if (object.Key) keys.push(object.Key);
+      }
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return keys;
   }
 }

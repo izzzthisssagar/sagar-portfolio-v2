@@ -84,3 +84,54 @@ the file reachable publicly. Both write an audit entry.
 
 See the env var block in `docs/sprint-3.md`. `MEDIA_MAX_IMAGE_BYTES` / `MEDIA_MAX_PDF_BYTES` bound
 request size per category before any parsing happens.
+
+## Reconciliation (`pnpm media:reconcile`)
+
+The upload/approve/archive pipeline above keeps the `MediaAsset` table and the storage backend in
+agreement in the normal case, but they can still drift apart out-of-band — a manual storage
+operation, a database restore into an environment with a different bucket, a crash between an
+object move and its DB update (`applyRepairs`'s own compensation logic aside, this is why the
+check exists at all). `apps/api/scripts/media-reconcile-lib.ts` holds the pure detection/repair
+logic (unit-tested against fakes in `media-reconcile-lib.test.ts`); `apps/api/scripts/media-reconcile.ts`
+is the CLI wiring it to the real `PrismaService` and the configured `MediaStorageAdapter`
+(`buildMediaStorageAdapter()`, same selection logic the running API uses).
+
+**Default is dry-run and read-only.** `pnpm media:reconcile` never writes to storage or the
+database unless `--repair --yes` is passed. `--json` prints machine-readable output; otherwise a
+human-readable summary. Exits non-zero if any `error`-severity finding is present (CI-friendly).
+
+Checks performed, each producing a `Finding` with a `FindingCode`:
+
+| Code                                                            | Severity | Meaning                                                                                                                                                                                                |
+| --------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MISSING_OBJECT`                                                | error    | A `MediaAsset` row's `storageKey` has no backing object.                                                                                                                                               |
+| `STATUS_PREFIX_MISMATCH`                                        | error    | The object's key prefix (`quarantine/`/`approved/`/`archived/`) disagrees with `status` (`REJECTED` is expected to still carry `quarantine/` — rejection never moves storage, see `media.service.ts`). |
+| `ORPHANED_OBJECT`                                               | warning  | An object exists in storage with no `MediaAsset` row referencing it.                                                                                                                                   |
+| `DUPLICATE_STORAGE_KEY`                                         | error    | Two rows share a `storageKey` (should be impossible given the DB unique constraint; checked defensively).                                                                                              |
+| `CHECKSUM_MISMATCH`                                             | error    | Opt-in only (`--verify-checksums`, downloads every referenced object) — recomputed SHA-256 disagrees with `MediaAsset.sha256`.                                                                         |
+| `CV_NOT_CONFIGURED`                                             | info     | No `CvDocument` is `active` (or none exists at all) — a valid, expected state, not an error.                                                                                                           |
+| `ACTIVE_CV_OBJECT_MISSING`                                      | error    | The active `CvDocument`'s media has no backing object — the public CV route will fail.                                                                                                                 |
+| `PORTRAIT_NOT_CONFIGURED`                                       | info     | `Profile.portraitMediaId` is unset — valid, expected state.                                                                                                                                            |
+| `PORTRAIT_OBJECT_MISSING`                                       | error    | The configured portrait's media has no backing object.                                                                                                                                                 |
+| `FEATURED_IMAGE_OBJECT_MISSING` / `SOCIAL_IMAGE_OBJECT_MISSING` | error    | A `BlogPost`'s featured/social image media has no backing object.                                                                                                                                      |
+| `PROJECT_MEDIA_OBJECT_MISSING`                                  | error    | A project evidence image's media has no backing object.                                                                                                                                                |
+
+**Repair mode (`--repair --yes`)** only auto-fixes `STATUS_PREFIX_MISMATCH` — moving the object to
+the storage prefix its DB status says it belongs at, exactly mirroring the direction
+`media.service.ts` itself moves objects on approve/archive. It never touches `MISSING_OBJECT`,
+`ORPHANED_OBJECT`, or `CHECKSUM_MISMATCH` findings (these require a human decision — re-upload,
+clear a reference, or manually inspect/delete — never an automated guess) and never infers a
+`status` from where an object happens to sit (it cannot mark something `APPROVED` merely because
+an object exists at `approved/...`). Each repair action is conservative: refuses to move a source
+object that no longer exists, refuses to overwrite an already-occupied destination key, and if the
+DB update fails after a successful object move, moves the object back so storage and DB stay in
+agreement (the same compensation pattern `media.service.ts` already uses). One action's failure
+never aborts the batch. A successful repair run writes one `AuditLog` row
+(`action: 'media.reconcile.repair'`) recording the finding/action counts and per-action outcome —
+never the object bytes or any secret.
+
+Storage backends implement two reconciliation-only methods beyond the upload/approve/archive
+pipeline's `put`/`get`/`move`/`delete`/`publicUrl`/`ping`: `exists(key)` (a HEAD-equivalent
+existence check, never downloads the body) and `list()` (full key enumeration — a recursive
+directory walk for `LocalStorageAdapter`, a paginated `ListObjectsV2` for `S3StorageAdapter`).
+Neither is called from any request-serving code path — only from `pnpm media:reconcile`.

@@ -567,7 +567,10 @@ export const cv = {
 
 export interface AdminContactDeliveryAttempt {
   id: string;
-  success: boolean;
+  /** PENDING means a real send was reserved but its outcome isn't known/persisted yet (e.g. the
+   * finalize write itself failed) — never automatically retried, and never treated as delivered
+   * or failed. See apps/api/src/contact/contact.service.ts. */
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
   reason?: string | null;
   createdAt: string;
 }
@@ -582,6 +585,11 @@ export interface AdminContactMessage {
   status: 'new' | 'read' | 'replied' | 'archived' | 'spam';
   createdAt: string;
   deliveryAttempts?: AdminContactDeliveryAttempt[];
+  /** True once this message has reached MAX_DELIVERY_ATTEMPTS real notification sends (automatic
+   * plus manual retries combined) — explicit from the API rather than inferred client-side from
+   * `deliveryAttempts.length`, since the list view only ever includes the latest one attempt, not
+   * the full history get() returns. See apps/api/src/contact/contact.service.ts. */
+  retryExhausted: boolean;
 }
 
 export interface ContactMessageListResult {
@@ -609,6 +617,8 @@ export const messages = {
     }),
   remove: (id: string) =>
     apiFetch<{ deleted: true }>(`/admin/messages/${id}`, { method: 'DELETE' }),
+  retryNotification: (id: string) =>
+    apiFetch<AdminContactMessage>(`/admin/messages/${id}/retry-notification`, { method: 'POST' }),
 };
 
 export interface DashboardSummary {

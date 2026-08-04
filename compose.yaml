@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    # Pinned tag@digest — see scripts/lib/pinned-images.sh, the single source of truth shared with
+    # CI, the staging stack, and the container smoke test.
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     environment:
       POSTGRES_DB: sagar_portfolio
       POSTGRES_USER: portfolio

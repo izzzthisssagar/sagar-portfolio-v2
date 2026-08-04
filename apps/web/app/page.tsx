@@ -18,6 +18,7 @@ import {
   getPublishedProjectBySlug,
   getPublishedProjects,
 } from '@/lib/public-content.server';
+import { getNonce } from '@/lib/nonce.server';
 import { JsonLd, personJsonLd, websiteJsonLd } from '@/lib/seo';
 
 export const metadata: Metadata = {
@@ -25,20 +26,21 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const [projects, qaMastery, notes, portrait, cvAvailable, profile] = await Promise.all([
+  const [projects, qaMastery, notes, portrait, cvAvailable, profile, nonce] = await Promise.all([
     getPublishedProjects(),
     getPublishedProjectBySlug('qa-mastery'),
     getPublishedPosts(),
     getActivePortrait(),
     getCvAvailable(),
     getPublicProfile(),
+    getNonce(),
   ]);
   return (
     <main id="main">
       {profile && (
         <>
-          <JsonLd data={personJsonLd(profile)} />
-          <JsonLd data={websiteJsonLd()} />
+          <JsonLd data={personJsonLd(profile)} nonce={nonce} />
+          <JsonLd data={websiteJsonLd()} nonce={nonce} />
         </>
       )}
       <Hero cvAvailable={cvAvailable} />

@@ -1,18 +1,26 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Cookie } from '@playwright/test';
 import { hasDatabase } from '../../playwright.config';
-import { loginViaUI } from './helpers';
+import { loginOnceAndCaptureCookies, useSharedSession } from './helpers';
 
 test.skip(!hasDatabase, 'requires DATABASE_URL for the live API + a provisioned admin account');
 
 test.describe('CMS project workflow', () => {
+  // One real UI login shared by both cases below — see helpers.ts's loginOnceAndCaptureCookies.
+  let authCookies: Cookie[] = [];
+
+  test.beforeAll(async ({ browser }) => {
+    authCookies = await loginOnceAndCaptureCookies(browser);
+  });
+
   test('creates, previews as draft, publishes, becomes public, then deletes via a keyboard-operable confirm dialog', async ({
     page,
+    context,
   }) => {
     const suffix = Date.now();
     const title = `E2E Project ${suffix}`;
     const slug = `e2e-project-${suffix}`;
 
-    await loginViaUI(page);
+    await useSharedSession(context, authCookies);
 
     await page.goto('/admin/projects/new');
     await page.getByLabel('Title').fill(title);
@@ -67,13 +75,13 @@ test.describe('CMS project workflow', () => {
     await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0);
   });
 
-  test('edits an existing project and persists the change', async ({ page }) => {
+  test('edits an existing project and persists the change', async ({ page, context }) => {
     const suffix = Date.now();
     const title = `E2E Edit Project ${suffix}`;
     const slug = `e2e-edit-project-${suffix}`;
     const updatedSummary = 'An updated automated end-to-end test project summary.';
 
-    await loginViaUI(page);
+    await useSharedSession(context, authCookies);
     await page.goto('/admin/projects/new');
     await page.getByLabel('Title').fill(title);
     await page.getByLabel('Slug').fill(slug);

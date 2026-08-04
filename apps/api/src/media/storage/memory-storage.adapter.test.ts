@@ -18,4 +18,21 @@ describe('MemoryStorageAdapter', () => {
     expect(adapter.publicUrl('approved/a')).toBe('memory://approved/a');
     expect(adapter.publicUrl('quarantine/a')).toBeNull();
   });
+
+  it('ping() always reports ok', async () => {
+    expect(await new MemoryStorageAdapter().ping()).toEqual({ ok: true });
+  });
+
+  it('exists() and list() reflect the current object set', async () => {
+    const adapter = new MemoryStorageAdapter();
+    expect(await adapter.exists('approved/a')).toBe(false);
+    expect(await adapter.list()).toEqual([]);
+    await adapter.put('approved/a', Buffer.from('x'), 'image/png');
+    await adapter.put('quarantine/b', Buffer.from('y'), 'image/png');
+    expect(await adapter.exists('approved/a')).toBe(true);
+    expect((await adapter.list()).sort()).toEqual(['approved/a', 'quarantine/b']);
+    await adapter.delete('approved/a');
+    expect(await adapter.exists('approved/a')).toBe(false);
+    expect(await adapter.list()).toEqual(['quarantine/b']);
+  });
 });

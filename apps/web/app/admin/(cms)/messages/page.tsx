@@ -46,45 +46,53 @@ export default async function MessagesPage({
         <p>No messages match these filters yet.</p>
       ) : (
         <>
-          <table className="project-table">
-            <thead>
-              <tr>
-                <th scope="col">From</th>
-                <th scope="col">Subject</th>
-                <th scope="col">Status</th>
-                <th scope="col">Received</th>
-                <th scope="col">Delivery</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.map((message) => {
-                const lastAttempt = message.deliveryAttempts?.[0];
-                return (
-                  <tr key={message.id}>
-                    <td>
-                      {message.name}
-                      <br />
-                      <span className="capline">{message.email}</span>
-                    </td>
-                    <td>{message.subject || '—'}</td>
-                    <td>
-                      <span
-                        className={`status-badge status-badge--${STATUS_BADGE_VARIANT[message.status]}`}
-                      >
-                        {message.status}
-                      </span>
-                    </td>
-                    <td>{new Date(message.createdAt).toLocaleDateString()}</td>
-                    <td>{lastAttempt ? (lastAttempt.success ? 'delivered' : 'failed') : '—'}</td>
-                    <td>
-                      <ContactRowActions message={message} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="table-scroll" role="region" aria-label="Messages" tabIndex={0}>
+            <table className="project-table">
+              <thead>
+                <tr>
+                  <th scope="col">From</th>
+                  <th scope="col">Subject</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Received</th>
+                  <th scope="col">Delivery</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.data.map((message) => {
+                  const lastAttempt = message.deliveryAttempts?.[0];
+                  return (
+                    <tr key={message.id}>
+                      <td>
+                        {message.name}
+                        <br />
+                        <span className="capline">{message.email}</span>
+                      </td>
+                      <td>{message.subject || '—'}</td>
+                      <td>
+                        <span
+                          className={`status-badge status-badge--${STATUS_BADGE_VARIANT[message.status]}`}
+                        >
+                          {message.status}
+                        </span>
+                      </td>
+                      <td>{new Date(message.createdAt).toLocaleDateString()}</td>
+                      <td>
+                        {lastAttempt
+                          ? { PENDING: 'pending', SUCCEEDED: 'delivered', FAILED: 'failed' }[
+                              lastAttempt.status
+                            ]
+                          : '—'}
+                      </td>
+                      <td>
+                        <ContactRowActions message={message} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           <nav aria-label="Message pagination" className="pagination">
             {page > 1 && <Link href={pageHref(page - 1)}>PREVIOUS</Link>}
             <span>

@@ -1,12 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Cookie } from '@playwright/test';
 import { hasDatabase } from '../../playwright.config';
-import { loginViaUI } from './helpers';
+import { loginOnceAndCaptureCookies, useSharedSession } from './helpers';
 
 test.skip(!hasDatabase, 'requires DATABASE_URL for the live API + a provisioned admin account');
 
 test.describe('Contact form and admin inbox', () => {
+  // One real UI login shared by both cases below — see helpers.ts's loginOnceAndCaptureCookies.
+  let authCookies: Cookie[] = [];
+
+  test.beforeAll(async ({ browser }) => {
+    authCookies = await loginOnceAndCaptureCookies(browser);
+  });
+
   test('a public submission is delivered and visible in the admin inbox, then can be deleted', async ({
     page,
+    context,
   }) => {
     const suffix = Date.now();
     const name = `E2E Contact ${suffix}`;
@@ -22,7 +30,7 @@ test.describe('Contact form and admin inbox', () => {
     await page.getByRole('button', { name: 'SEND' }).click();
     await expect(page.getByRole('status')).toContainText('Message received');
 
-    await loginViaUI(page);
+    await useSharedSession(context, authCookies);
     await page.goto('/admin/messages');
     const row = page.getByRole('row', { name: new RegExp(name) });
     await expect(row).toBeVisible();
@@ -40,6 +48,7 @@ test.describe('Contact form and admin inbox', () => {
 
   test('a filled honeypot is silently accepted but never reaches the admin inbox', async ({
     page,
+    context,
   }) => {
     const suffix = Date.now();
     const name = `E2E Honeypot ${suffix}`;
@@ -57,7 +66,7 @@ test.describe('Contact form and admin inbox', () => {
     await page.getByRole('button', { name: 'SEND' }).click();
     await expect(page.getByRole('status')).toContainText('Message received');
 
-    await loginViaUI(page);
+    await useSharedSession(context, authCookies);
     await page.goto('/admin/messages');
     await expect(page.getByRole('row', { name: new RegExp(name) })).toHaveCount(0);
   });

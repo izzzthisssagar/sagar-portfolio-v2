@@ -27,4 +27,16 @@ export class MemoryStorageAdapter implements MediaStorageAdapter {
   publicUrl(key: string): string | null {
     return key.startsWith('approved/') ? `memory://${key}` : null;
   }
+
+  async ping(): Promise<{ ok: boolean }> {
+    return { ok: true };
+  }
+
+  async exists(key: string): Promise<boolean> {
+    return this.objects.has(key);
+  }
+
+  async list(): Promise<string[]> {
+    return Array.from(this.objects.keys());
+  }
 }

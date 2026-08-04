@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { type AdminRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -61,6 +62,7 @@ export class AdminMediaController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @UseInterceptors(
     FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES } }),
   )

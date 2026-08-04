@@ -91,24 +91,26 @@ export default async function Dashboard() {
         {data.recentAuditEvents.length === 0 ? (
           <p>No audit events recorded yet.</p>
         ) : (
-          <table className="dashboard-audit-table">
-            <thead>
-              <tr>
-                <th scope="col">Action</th>
-                <th scope="col">Resource</th>
-                <th scope="col">When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.recentAuditEvents.map((event) => (
-                <tr key={event.id}>
-                  <td>{event.action}</td>
-                  <td>{event.resource ?? '—'}</td>
-                  <td>{new Date(event.createdAt).toLocaleString()}</td>
+          <div className="table-scroll" role="region" aria-label="Recent audit events" tabIndex={0}>
+            <table className="dashboard-audit-table">
+              <thead>
+                <tr>
+                  <th scope="col">Action</th>
+                  <th scope="col">Resource</th>
+                  <th scope="col">When</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.recentAuditEvents.map((event) => (
+                  <tr key={event.id}>
+                    <td>{event.action}</td>
+                    <td>{event.resource ?? '—'}</td>
+                    <td>{new Date(event.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </main>
