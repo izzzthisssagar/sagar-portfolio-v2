@@ -331,6 +331,16 @@ model ContactMessage {
   @@index([email, createdAt])
 }
 
+enum ContactDeliveryAttemptStatus {
+  /// Reserved before the real SMTP send is invoked — a slot has been durably claimed, but the
+  /// outcome isn't known/persisted yet. A row stuck PENDING (the finalize write itself failed)
+  /// still counts against MAX_DELIVERY_ATTEMPTS and is never automatically resent; it requires
+  /// manual reconciliation, not a blind retry (see contact.service.ts).
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 /// One row per notification-delivery attempt for a ContactMessage — never the message body or
 /// any personal data, only outcome. One row per real ContactNotificationAdapter.send() call,
 /// always — never one row summarizing several sends (see docs/contact-delivery.md).
@@ -338,14 +348,18 @@ model ContactMessage {
 /// @@unique constraint is the database-enforced backstop against two concurrent allocations
 /// ever landing on the same number (application code also serializes real sends via
 /// ContactMessage.retryClaimedAt for manual retries).
+/// The row is created with status=PENDING *before* the real send happens (reserveAttempt) and
+/// updated to SUCCEEDED/FAILED afterward (finalizeAttempt) — a real send can never occur without
+/// an already-persisted row claiming its slot, so MAX_DELIVERY_ATTEMPTS is enforced against real
+/// sends even if the finalize write itself fails.
 model ContactDeliveryAttempt {
-  id               String         @id @default(cuid())
+  id               String                       @id @default(cuid())
   contactMessageId String
-  contactMessage   ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+  contactMessage   ContactMessage               @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
   attemptNumber    Int
-  success          Boolean
+  status           ContactDeliveryAttemptStatus @default(PENDING)
   reason           String?
-  createdAt        DateTime       @default(now())
+  createdAt        DateTime                     @default(now())
 
   @@unique([contactMessageId, attemptNumber])
   @@index([contactMessageId])

@@ -213,7 +213,7 @@ databaseSuite('Dashboard: live operational counts', () => {
       data: {
         contactMessageId: message.id,
         attemptNumber: 1,
-        success: false,
+        status: 'FAILED',
         reason: 'SMTP fixture failure.',
       },
     });

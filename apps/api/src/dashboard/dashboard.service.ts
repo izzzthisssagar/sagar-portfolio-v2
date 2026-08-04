@@ -41,7 +41,7 @@ export class DashboardService {
       this.prisma.mediaAsset.count({ where: { status: 'REJECTED' } }),
       this.prisma.blogPost.count({ where: { status: 'PUBLISHED' } }),
       this.prisma.blogPost.count({ where: { status: 'DRAFT' } }),
-      this.prisma.contactDeliveryAttempt.count({ where: { success: false } }),
+      this.prisma.contactDeliveryAttempt.count({ where: { status: 'FAILED' } }),
       this.prisma.cvDocument.count({ where: { active: true } }),
       this.prisma.profile.findFirst({ select: { portraitMediaId: true } }),
       this.prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),

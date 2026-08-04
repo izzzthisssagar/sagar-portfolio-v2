@@ -19,7 +19,7 @@ export function ContactRowActions({ message }: { message: AdminContactMessage })
   // deliveryAttempts.length here, since the list view's own array is deliberately truncated to
   // the latest one attempt and would under-count.
   const canRetry =
-    lastAttempt !== undefined && lastAttempt.success === false && !message.retryExhausted;
+    lastAttempt !== undefined && lastAttempt.status === 'FAILED' && !message.retryExhausted;
 
   async function setStatus(status: AdminContactMessage['status']) {
     setPending(true);

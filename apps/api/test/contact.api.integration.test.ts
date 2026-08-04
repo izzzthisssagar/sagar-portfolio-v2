@@ -74,7 +74,7 @@ databaseSuite('Contact messages: submission, honeypot, delivery tracking, admin 
     expect(stored).not.toBeNull();
     expect(stored?.status).toBe('NEW');
     expect(stored?.deliveryAttempts).toHaveLength(1);
-    expect(stored?.deliveryAttempts[0]?.success).toBe(true);
+    expect(stored?.deliveryAttempts[0]?.status).toBe('SUCCEEDED');
   });
 
   it('accepts a honeypot-tripped submission with the same generic response but never persists it', async () => {
@@ -260,7 +260,7 @@ databaseSuite('Contact messages: submission, honeypot, delivery tracking, admin 
       data: Array.from({ length: 5 }, (_, i) => ({
         contactMessageId: created.id,
         attemptNumber: startAt + i,
-        success: false,
+        status: 'FAILED',
         reason: 'fixture',
       })),
     });

@@ -567,7 +567,10 @@ export const cv = {
 
 export interface AdminContactDeliveryAttempt {
   id: string;
-  success: boolean;
+  /** PENDING means a real send was reserved but its outcome isn't known/persisted yet (e.g. the
+   * finalize write itself failed) — never automatically retried, and never treated as delivered
+   * or failed. See apps/api/src/contact/contact.service.ts. */
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
   reason?: string | null;
   createdAt: string;
 }

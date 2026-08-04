@@ -13,36 +13,49 @@ const baseMessage = {
   createdAt: new Date(),
   ipHash: null,
   retryClaimedAt: null,
-  deliveryAttempts: [] as { id: string; success: boolean }[],
 };
 
 function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {}) {
   const auditCreate = vi.fn().mockResolvedValue({});
-  const deliveryCreate = vi.fn().mockResolvedValue({ attemptNumber: 1 });
-  // Every recordAttempt() call reads the current max attemptNumber first — a fresh message with
-  // no prior attempts, matching baseMessage's empty deliveryAttempts, unless a test overrides it.
+  // reserveAttempt() reads the current max attemptNumber, then creates a PENDING row — a fresh
+  // message with no prior attempts unless a test overrides it.
   const deliveryAggregate = vi.fn().mockResolvedValue({ _max: { attemptNumber: null } });
-  const messageUpdate = vi.fn().mockResolvedValue(baseMessage);
-  const messageUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const deliveryCreate = vi.fn().mockResolvedValue({ id: 'attempt1', attemptNumber: 1 });
+  const deliveryUpdate = vi.fn().mockResolvedValue({});
+  const deliveryCount = vi.fn().mockResolvedValue(0);
+  const txMessageUpdate = vi.fn().mockResolvedValue({ ...baseMessage, status: 'READ' });
+  const txMessageDelete = vi.fn().mockResolvedValue(baseMessage);
+  const txMessageUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  // retryNotification wraps the claim + cap-check + reservation in one $transaction, then
+  // finalize + claim-clear + audit in a second — both use this same tx client in the mock.
   const tx = {
     contactMessage: {
-      update: vi.fn().mockResolvedValue({ ...baseMessage, status: 'READ' }),
-      delete: vi.fn().mockResolvedValue(baseMessage),
+      update: txMessageUpdate,
+      delete: txMessageDelete,
+      updateMany: txMessageUpdateMany,
     },
-    contactDeliveryAttempt: { create: deliveryCreate, aggregate: deliveryAggregate },
+    contactDeliveryAttempt: {
+      create: deliveryCreate,
+      update: deliveryUpdate,
+      aggregate: deliveryAggregate,
+      count: deliveryCount,
+    },
     auditLog: { create: auditCreate },
   };
   const prisma = {
     contactMessage: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([{ ...baseMessage, _count: { deliveryAttempts: 0 } }]),
-      findUnique: vi.fn().mockResolvedValue(baseMessage),
+      findUnique: vi.fn().mockResolvedValue({ ...baseMessage, deliveryAttempts: [] }),
       count: vi.fn().mockResolvedValue(1),
       create: vi.fn().mockResolvedValue(baseMessage),
-      update: messageUpdate,
-      updateMany: messageUpdateMany,
     },
-    contactDeliveryAttempt: { create: deliveryCreate, aggregate: deliveryAggregate },
+    contactDeliveryAttempt: {
+      create: deliveryCreate,
+      update: deliveryUpdate,
+      aggregate: deliveryAggregate,
+      count: deliveryCount,
+    },
     auditLog: { create: auditCreate },
     $transaction: vi.fn((value: unknown) =>
       typeof value === 'function'
@@ -57,16 +70,17 @@ function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {
     tx,
     auditCreate,
     deliveryCreate,
+    deliveryUpdate,
     deliveryAggregate,
-    messageUpdate,
-    messageUpdateMany,
+    deliveryCount,
+    txMessageUpdateMany,
     notifier,
   };
 }
 
 describe('ContactService.submit', () => {
-  it('persists a genuine submission and records a successful delivery attempt', async () => {
-    const { service, prisma, notifier, deliveryCreate } = setup();
+  it('reserves an attempt before sending, and finalizes it SUCCEEDED on delivery', async () => {
+    const { service, prisma, notifier, deliveryCreate, deliveryUpdate } = setup();
     await service.submit(
       { name: ' Jane Doe ', email: ' Jane@Example.invalid ', message: 'A question.' },
       'iphash123',
@@ -81,8 +95,21 @@ describe('ContactService.submit', () => {
       }),
     );
     expect(notifier.send).toHaveBeenCalledTimes(1);
+    // The reservation (PENDING) happens before send() is ever called — asserted by call order,
+    // not just by both eventually having been called.
     expect(deliveryCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ success: true }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ attemptNumber: 1, status: 'PENDING' }),
+      }),
+    );
+    expect(deliveryCreate.mock.invocationCallOrder[0]!).toBeLessThan(
+      notifier.send.mock.invocationCallOrder[0]!,
+    );
+    expect(deliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'attempt1' },
+        data: expect.objectContaining({ status: 'SUCCEEDED' }),
+      }),
     );
   });
 
@@ -105,16 +132,17 @@ describe('ContactService.submit', () => {
     expect(prisma.contactMessage.create).not.toHaveBeenCalled();
   });
 
-  it('retries delivery up to the bound and records the final outcome, without losing the message', async () => {
-    const { service, prisma, notifier, deliveryCreate } = setup({
+  it('retries delivery up to the bound and finalizes each real send as its own attempt', async () => {
+    const { service, prisma, notifier, deliveryCreate, deliveryUpdate } = setup({
       send: vi.fn().mockResolvedValue({ delivered: false, reason: 'SMTP timeout' }),
     });
     await service.submit({ name: 'Jane', email: 'jane@example.invalid', message: 'Hello.' });
     expect(prisma.contactMessage.create).toHaveBeenCalledTimes(1);
     expect(notifier.send).toHaveBeenCalledTimes(2);
-    expect(deliveryCreate).toHaveBeenCalledWith(
+    expect(deliveryCreate).toHaveBeenCalledTimes(2);
+    expect(deliveryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ success: false, reason: 'SMTP timeout' }),
+        data: expect.objectContaining({ status: 'FAILED', reason: 'SMTP timeout' }),
       }),
     );
   });
@@ -127,6 +155,26 @@ describe('ContactService.submit', () => {
     const { service, notifier } = setup({ send });
     await service.submit({ name: 'Jane', email: 'jane@example.invalid', message: 'Hello.' });
     expect(notifier.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('never calls the notifier when the reservation itself fails to persist', async () => {
+    const { service, notifier, deliveryCreate } = setup();
+    deliveryCreate.mockRejectedValueOnce(new Error('database unavailable'));
+    await service.submit({ name: 'Jane', email: 'jane@example.invalid', message: 'Hello.' });
+    // Reservation failed on the first iteration — the automatic loop stops rather than calling
+    // the real notifier with no durable slot claimed first.
+    expect(notifier.send).not.toHaveBeenCalled();
+  });
+
+  it('stops the automatic loop (does not resend blind) when finalizing a real send fails', async () => {
+    const { service, notifier, deliveryUpdate } = setup({
+      send: vi.fn().mockResolvedValue({ delivered: false, reason: 'SMTP timeout' }),
+    });
+    deliveryUpdate.mockRejectedValueOnce(new Error('database unavailable'));
+    await service.submit({ name: 'Jane', email: 'jane@example.invalid', message: 'Hello.' });
+    // The real send happened once (its reservation is left PENDING, not resent automatically) —
+    // never a second blind send within the same submission.
+    expect(notifier.send).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -162,36 +210,42 @@ describe('ContactService.retryNotification', () => {
     await expect(service.retryNotification('missing')).rejects.toThrow('Message not found');
   });
 
-  it('refuses to retry once MAX_DELIVERY_ATTEMPTS is reached, without touching the claim or notifier', async () => {
-    const { service, prisma, notifier, messageUpdateMany } = setup();
-    prisma.contactMessage.findUnique.mockResolvedValueOnce({
-      ...baseMessage,
-      deliveryAttempts: Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, success: false })),
-    });
+  it('refuses to retry once MAX_DELIVERY_ATTEMPTS is reached, and never reserves or sends', async () => {
+    const { service, notifier, deliveryCreate, deliveryCount } = setup();
+    // The cap check now reads the real reservation count transactionally, not a pre-transaction
+    // findUnique — 5 already-reserved attempts (any status) is enough to refuse.
+    deliveryCount.mockResolvedValueOnce(5);
     await expect(service.retryNotification('msg1')).rejects.toMatchObject({
       response: expect.objectContaining({ code: 'RETRY_LIMIT_REACHED' }),
     });
-    expect(messageUpdateMany).not.toHaveBeenCalled();
+    expect(deliveryCreate).not.toHaveBeenCalled();
     expect(notifier.send).not.toHaveBeenCalled();
   });
 
-  it('rejects when the atomic claim fails (a retry is already in progress)', async () => {
-    const { service, prisma, notifier, messageUpdateMany } = setup();
-    messageUpdateMany.mockResolvedValueOnce({ count: 0 });
+  it('rejects when the atomic claim fails (a retry is already in progress), before ever reserving', async () => {
+    const { service, notifier, deliveryCreate, txMessageUpdateMany } = setup();
+    txMessageUpdateMany.mockResolvedValueOnce({ count: 0 });
     await expect(service.retryNotification('msg1')).rejects.toMatchObject({
       response: expect.objectContaining({ code: 'RETRY_IN_PROGRESS' }),
     });
+    expect(deliveryCreate).not.toHaveBeenCalled();
     expect(notifier.send).not.toHaveBeenCalled();
-    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('on a successful claim, sends once, records the attempt, clears the claim, and audits — even on delivery failure', async () => {
-    const { service, prisma, notifier, tx, deliveryCreate, auditCreate } = setup({
+  it('never calls the notifier when the reservation itself fails to persist', async () => {
+    const { service, notifier, deliveryCreate } = setup();
+    deliveryCreate.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(service.retryNotification('msg1')).rejects.toThrow('database unavailable');
+    expect(notifier.send).not.toHaveBeenCalled();
+  });
+
+  it('on a successful claim, reserves before sending, finalizes, clears the claim, and audits — even on delivery failure', async () => {
+    const { service, notifier, tx, deliveryCreate, deliveryUpdate, auditCreate } = setup({
       send: vi.fn().mockResolvedValue({ delivered: false, reason: 'SMTP timeout' }),
     });
     await service.retryNotification('msg1', 'admin1');
 
-    expect(prisma.contactMessage.updateMany).toHaveBeenCalledWith(
+    expect(tx.contactMessage.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           id: 'msg1',
@@ -200,21 +254,25 @@ describe('ContactService.retryNotification', () => {
         data: { retryClaimedAt: expect.any(Date) },
       }),
     );
-    expect(notifier.send).toHaveBeenCalledTimes(1);
     expect(deliveryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           contactMessageId: 'msg1',
           attemptNumber: 1,
-          success: false,
-          reason: 'SMTP timeout',
+          status: 'PENDING',
         }),
       }),
     );
-    // The claim is always released, whether delivery succeeded or not — a failed retry must
-    // remain retryable up to MAX_DELIVERY_ATTEMPTS. Cleared inside the same transaction as the
-    // attempt-row create (see contact.service.ts) — tx.contactMessage.update, not the top-level
-    // prisma.contactMessage.update.
+    expect(deliveryCreate.mock.invocationCallOrder[0]!).toBeLessThan(
+      notifier.send.mock.invocationCallOrder[0]!,
+    );
+    expect(notifier.send).toHaveBeenCalledTimes(1);
+    expect(deliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'attempt1' },
+        data: expect.objectContaining({ status: 'FAILED', reason: 'SMTP timeout' }),
+      }),
+    );
     expect(tx.contactMessage.update).toHaveBeenCalledWith({
       where: { id: 'msg1' },
       data: { retryClaimedAt: null },
@@ -223,7 +281,7 @@ describe('ContactService.retryNotification', () => {
       action: 'CONTACT_MESSAGE_NOTIFICATION_RETRIED',
       resourceId: 'msg1',
       actorId: 'admin1',
-      metadata: { delivered: false },
+      metadata: { delivered: false, attemptNumber: 1 },
     });
   });
 });
