@@ -7,5 +7,6 @@ import { HealthService } from './health.service';
   imports: [StorageModule],
   controllers: [HealthController],
   providers: [HealthService],
+  exports: [HealthService],
 })
 export class HealthModule {}

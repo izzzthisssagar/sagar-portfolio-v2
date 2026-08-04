@@ -147,16 +147,44 @@ export const contactSchema = z
  * `"false"` (default) matches Express's own default and is correct with no reverse proxy in
  * front. `"1"` means "trust exactly one hop" — the only topology this app documents support for
  * (see docs/security-production.md) — everything else is rejected rather than guessed at. */
-export const operationalSchema = z.object({
-  RATE_LIMIT_MAX: boundedInt(1, 100_000, 60),
-  TRUST_PROXY: z.enum(['false', '1']).default('false'),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-  LOG_FORMAT: z.enum(['json', 'pretty']).optional(),
-  SERVICE_NAME: z.string().trim().min(1).default('portfolio-api'),
-  RELEASE_SHA: z.string().trim().min(1).default('unknown'),
-  HEALTH_INTERNAL_TOKEN: z.string().min(16).optional(),
-  SHUTDOWN_GRACE_PERIOD_MS: boundedInt(0, 60_000, 10_000),
-});
+export const operationalSchema = z
+  .object({
+    RATE_LIMIT_MAX: boundedInt(1, 100_000, 60),
+    TRUST_PROXY: z.enum(['false', '1']).default('false'),
+    LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    LOG_FORMAT: z.enum(['json', 'pretty']).optional(),
+    SERVICE_NAME: z.string().trim().min(1).default('portfolio-api'),
+    RELEASE_SHA: z.string().trim().min(1).default('unknown'),
+    HEALTH_INTERNAL_TOKEN: z.string().min(16).optional(),
+    SHUTDOWN_GRACE_PERIOD_MS: boundedInt(0, 60_000, 10_000),
+    // Default off in every environment — an internal metrics endpoint is only ever opted into
+    // explicitly. See metrics/metrics.controller.ts.
+    METRICS_ENABLED: bool(false),
+    METRICS_TOKEN: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.METRICS_ENABLED) return;
+    // Enforced in every environment (not just production) — an enabled-but-tokenless metrics
+    // endpoint is a real information-disclosure risk anywhere it's reachable, not only in
+    // production. This is what makes "fails closed" true: `loadConfigOrThrow` (the real
+    // bootstrap's only entry point) refuses to start at all rather than start with metrics
+    // reachable and unauthenticated.
+    if (!v.METRICS_TOKEN) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['METRICS_TOKEN'],
+        message: 'is required when METRICS_ENABLED=true',
+      });
+      return;
+    }
+    if (v.METRICS_TOKEN.length < 16) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['METRICS_TOKEN'],
+        message: 'must be at least 16 characters when METRICS_ENABLED=true',
+      });
+    }
+  });
 
 export const apiEnvSchema = coreSchema
   .and(authSchema)

@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { recordHttpRequest } from '../metrics/registry';
 import type { StructuredLogger } from './structured-logger';
 
 interface RequestExtras {
@@ -24,6 +25,12 @@ export function createAccessLogMiddleware(logger: StructuredLogger) {
         route: withId.route?.path ?? req.path,
         statusCode: res.statusCode,
         durationMs: Math.round(durationMs * 100) / 100,
+      });
+      recordHttpRequest({
+        matchedRoute: withId.route?.path,
+        method: req.method,
+        statusCode: res.statusCode,
+        durationMs,
       });
     });
     next();

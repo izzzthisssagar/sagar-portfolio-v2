@@ -20,6 +20,7 @@ function main() {
     `  CONTACT_NOTIFICATION_DRIVER: ${config!.CONTACT_NOTIFICATION_DRIVER ?? '(unset — capture)'}`,
   );
   console.log(`  RATE_LIMIT_MAX: ${config!.RATE_LIMIT_MAX}`);
+  console.log(`  METRICS_ENABLED: ${config!.METRICS_ENABLED}`);
   console.log(`  TRUST_PROXY: ${config!.TRUST_PROXY}`);
   console.log(`  LOG_LEVEL: ${config!.LOG_LEVEL}`);
 }

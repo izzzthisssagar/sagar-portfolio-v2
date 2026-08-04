@@ -2,6 +2,21 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException } from '@nestjs/co
 import type { Request, Response } from 'express';
 import { resolveRequestId } from './logging/request-id';
 import type { StructuredLogger } from './logging/structured-logger';
+import {
+  recordAuthFailure,
+  recordDatabaseFailure,
+  recordRateLimitRejection,
+} from './metrics/registry';
+
+/** Prisma's generated error classes are all named `PrismaClient*Error` — matched by constructor
+ * name rather than `instanceof` so this never needs to import `@prisma/client` just to recognize
+ * one, and keeps working across whichever specific Prisma error subclass is thrown. This is a
+ * best-effort signal ("database failures where safely observable", not a guarantee every DB
+ * failure is caught here) — a service that already translates a Prisma error into its own
+ * HttpException (a 404, a 409) never reaches this filter as an unhandled 500 in the first place. */
+function isPrismaError(exception: unknown): boolean {
+  return exception instanceof Error && exception.constructor.name.startsWith('PrismaClient');
+}
 
 /** Optional — `configure-app.ts` passes the real `StructuredLogger`; every test harness that
  * constructs `new ErrorEnvelopeFilter()` directly (none currently do, but nothing requires one
@@ -57,6 +72,9 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
     } else if (status === 500) {
       console.error('Unhandled exception', exception);
     }
+    if (status === 401) recordAuthFailure(code);
+    else if (status === 429) recordRateLimitRejection(request.route?.path);
+    else if (status === 500 && isPrismaError(exception)) recordDatabaseFailure();
     response.status(status).json({ error: { code, message, requestId } });
   }
 }

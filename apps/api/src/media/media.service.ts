@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { MediaCategory, MediaStatus, Prisma, type MediaAsset } from '@prisma/client';
 import sharp from 'sharp';
+import { recordMediaTransitionFailure } from '../metrics/registry';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ApproveMediaDto, ListMediaDto, RejectMediaDto, UpdateMediaDto } from './media.dto';
 import { normalizeFilenameForDisplay, storageKey, validateUpload } from './media-validation';
@@ -200,6 +201,7 @@ export class MediaService {
     const media = await this.prisma.mediaAsset.findUnique({ where: { id } });
     if (!media) throw new NotFoundException('Media asset not found');
     if (media.status !== MediaStatus.QUARANTINED) {
+      recordMediaTransitionFailure('approve');
       throw new BadRequestException('Only quarantined media can be approved.');
     }
     const altText = input.altText ?? media.altText;
@@ -251,6 +253,7 @@ export class MediaService {
   async reject(id: string, input: RejectMediaDto, actorId?: string) {
     const media = await this.get(id);
     if (media.status !== 'quarantined') {
+      recordMediaTransitionFailure('reject');
       throw new BadRequestException('Only quarantined media can be rejected.');
     }
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -280,6 +283,7 @@ export class MediaService {
     const media = await this.prisma.mediaAsset.findUnique({ where: { id } });
     if (!media) throw new NotFoundException('Media asset not found');
     if (media.status !== MediaStatus.APPROVED) {
+      recordMediaTransitionFailure('archive');
       throw new BadRequestException('Only approved media can be archived.');
     }
     const nextKey = storageKey('archived', media.sha256, media.extension);

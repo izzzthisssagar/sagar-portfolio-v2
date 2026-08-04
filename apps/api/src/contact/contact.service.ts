@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ContactStatus, Prisma } from '@prisma/client';
+import { recordContactNotification } from '../metrics/registry';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ContactStatusInput, ListContactMessagesDto, SubmitContactDto } from './contact.dto';
 import {
@@ -79,6 +80,7 @@ export class ContactService {
         subject: created.subject,
         message: created.message,
       });
+      recordContactNotification(lastResult.delivered);
       if (lastResult.delivered) break;
     }
     await this.prisma.contactDeliveryAttempt.create({
@@ -134,6 +136,7 @@ export class ContactService {
       subject: existing.subject,
       message: existing.message,
     });
+    recordContactNotification(result.delivered);
 
     await this.prisma.$transaction([
       this.prisma.contactDeliveryAttempt.create({
