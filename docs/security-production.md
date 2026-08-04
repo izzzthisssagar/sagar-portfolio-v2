@@ -108,7 +108,7 @@ needs a fresh per-request nonce.
   **Cross-Origin-Resource-Policy**: same values and reasoning as the API's.
 - **Automated coverage**: `apps/web/lib/security-headers.test.ts` (unit, CSP string construction)
   and `tests/e2e/smoke.spec.ts`'s `security headers are present and the JSON-LD nonce matches the
-  CSP header` test (e2e, against a real running server — reads the *raw response body*, not the
+CSP header` test (e2e, against a real running server — reads the _raw response body_, not the
   post-hydration DOM, since React deliberately strips the `nonce` attribute from `<script>`
   elements after hydration so an XSS payload can't read it back out via
   `document.querySelectorAll`).

@@ -74,7 +74,13 @@ s3Suite('Media pipeline over the real S3-compatible protocol (MinIO)', () => {
     adminId = admin.id;
     adminToken = new JwtService().sign(
       { sub: admin.id, role: 'admin', tokenVersion: admin.tokenVersion },
-      { secret: accessSecret, issuer: accessIssuer, audience: accessAudience, algorithm: 'HS256', expiresIn: '5m' },
+      {
+        secret: accessSecret,
+        issuer: accessIssuer,
+        audience: accessAudience,
+        algorithm: 'HS256',
+        expiresIn: '5m',
+      },
     );
   });
 
@@ -98,7 +104,10 @@ s3Suite('Media pipeline over the real S3-compatible protocol (MinIO)', () => {
     const uploaded = await request(server())
       .post('/api/v1/admin/media')
       .set(auth())
-      .attach('file', await pngBuffer('#ff00ff'), { filename: 's3-evidence.png', contentType: 'image/png' })
+      .attach('file', await pngBuffer('#ff00ff'), {
+        filename: 's3-evidence.png',
+        contentType: 'image/png',
+      })
       .expect(201);
     expect(uploaded.body.data.storageKey).toMatch(/^quarantine\//);
     createdKeys.push(uploaded.body.data.storageKey);
@@ -113,7 +122,10 @@ s3Suite('Media pipeline over the real S3-compatible protocol (MinIO)', () => {
     const uploaded = await request(server())
       .post('/api/v1/admin/media')
       .set(auth())
-      .attach('file', await pngBuffer('#00ff88'), { filename: 's3-public.png', contentType: 'image/png' })
+      .attach('file', await pngBuffer('#00ff88'), {
+        filename: 's3-public.png',
+        contentType: 'image/png',
+      })
       .expect(201);
     const id = uploaded.body.data.id as string;
     const quarantineKey = uploaded.body.data.storageKey as string;
@@ -141,7 +153,10 @@ s3Suite('Media pipeline over the real S3-compatible protocol (MinIO)', () => {
     const uploaded = await request(server())
       .post('/api/v1/admin/media')
       .set(auth())
-      .attach('file', await pngBuffer('#8800ff'), { filename: 's3-archive.png', contentType: 'image/png' })
+      .attach('file', await pngBuffer('#8800ff'), {
+        filename: 's3-archive.png',
+        contentType: 'image/png',
+      })
       .expect(201);
     const id = uploaded.body.data.id as string;
 

@@ -69,7 +69,9 @@ async function check(results, name, fn) {
 }
 
 function expectStatus(response, expected) {
-  const ok = Array.isArray(expected) ? expected.includes(response.status) : response.status === expected;
+  const ok = Array.isArray(expected)
+    ? expected.includes(response.status)
+    : response.status === expected;
   if (!ok) {
     throw new Error(`expected status ${expected}, got ${response.status}`);
   }
@@ -100,7 +102,11 @@ async function main() {
     expectStatus(response, 200);
   });
   await check(results, `web: /work/${args.projectSlug} 200`, async () => {
-    const { response } = await fetchWithTimeout(`${webBase}/work/${args.projectSlug}`, {}, args.timeout);
+    const { response } = await fetchWithTimeout(
+      `${webBase}/work/${args.projectSlug}`,
+      {},
+      args.timeout,
+    );
     expectStatus(response, 200);
   });
   await check(results, 'web: /notes index 200', async () => {
@@ -115,7 +121,8 @@ async function main() {
     const { response } = await fetchWithTimeout(`${webBase}/sitemap.xml`, {}, args.timeout);
     expectStatus(response, 200);
     const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.includes('xml')) throw new Error(`expected xml content-type, got "${contentType}"`);
+    if (!contentType.includes('xml'))
+      throw new Error(`expected xml content-type, got "${contentType}"`);
   });
   await check(results, 'web: /robots.txt 200', async () => {
     const { response } = await fetchWithTimeout(`${webBase}/robots.txt`, {}, args.timeout);
@@ -141,11 +148,19 @@ async function main() {
     return body;
   });
   await check(results, 'api: public project list responds', async () => {
-    const { response } = await fetchWithTimeout(`${apiBase}/api/v1/projects?page=1&limit=10`, {}, args.timeout);
+    const { response } = await fetchWithTimeout(
+      `${apiBase}/api/v1/projects?page=1&limit=10`,
+      {},
+      args.timeout,
+    );
     expectStatus(response, 200);
   });
   await check(results, 'api: public post list responds', async () => {
-    const { response } = await fetchWithTimeout(`${apiBase}/api/v1/posts?page=1&limit=10`, {}, args.timeout);
+    const { response } = await fetchWithTimeout(
+      `${apiBase}/api/v1/posts?page=1&limit=10`,
+      {},
+      args.timeout,
+    );
     expectStatus(response, 200);
   });
   await check(results, 'api: unknown media id returns 404 with a safe envelope', async () => {

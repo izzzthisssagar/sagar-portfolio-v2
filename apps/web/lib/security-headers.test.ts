@@ -20,8 +20,8 @@ describe('buildCsp', () => {
 
   it('includes the API origin in connect-src and img-src', () => {
     const csp = buildCsp('n', 'https://api.example.com', true);
-    expect(csp).toContain('connect-src \'self\' https://api.example.com');
-    expect(csp).toContain('img-src \'self\' data: https://api.example.com');
+    expect(csp).toContain("connect-src 'self' https://api.example.com");
+    expect(csp).toContain("img-src 'self' data: https://api.example.com");
   });
 
   it('never contains a wildcard directive', () => {
@@ -50,7 +50,6 @@ describe('buildCsp', () => {
       'upgrade-insecure-requests',
     );
   });
-
 });
 
 describe('originOf', () => {
@@ -58,7 +57,7 @@ describe('originOf', () => {
     expect(originOf('https://api.example.com/v1/foo')).toBe('https://api.example.com');
   });
 
-  it('falls back to \'self\' for an unparseable URL', () => {
+  it("falls back to 'self' for an unparseable URL", () => {
     expect(originOf('not-a-url')).toBe("'self'");
   });
 });

@@ -190,7 +190,10 @@ databaseSuite('Contact messages: submission, honeypot, delivery tracking, admin 
       prisma.contactMessage.updateMany({
         where: {
           id: created.id,
-          OR: [{ retryClaimedAt: null }, { retryClaimedAt: { lt: new Date(Date.now() - 120_000) } }],
+          OR: [
+            { retryClaimedAt: null },
+            { retryClaimedAt: { lt: new Date(Date.now() - 120_000) } },
+          ],
         },
         data: { retryClaimedAt: new Date() },
       });
