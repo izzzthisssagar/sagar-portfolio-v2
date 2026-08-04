@@ -63,4 +63,23 @@ describe('LocalStorageAdapter', () => {
     expect(result.ok).toBe(false);
     expect(result.detail).toBeTruthy();
   });
+
+  it('exists() reports true for a written key and false otherwise', async () => {
+    await adapter.put('quarantine/abc.png', Buffer.from('hello'), 'image/png');
+    expect(await adapter.exists('quarantine/abc.png')).toBe(true);
+    expect(await adapter.exists('quarantine/nope.png')).toBe(false);
+  });
+
+  it('list() enumerates every object across nested prefixes with forward-slash keys', async () => {
+    await adapter.put('quarantine/a.png', Buffer.from('a'), 'image/png');
+    await adapter.put('approved/b.png', Buffer.from('b'), 'image/png');
+    await adapter.put('archived/deep/c.png', Buffer.from('c'), 'image/png');
+    const keys = (await adapter.list()).sort();
+    expect(keys).toEqual(['approved/b.png', 'archived/deep/c.png', 'quarantine/a.png']);
+  });
+
+  it('list() returns an empty array for a storage root that does not exist yet', async () => {
+    const empty = new LocalStorageAdapter(join(root, 'not-yet-created'));
+    expect(await empty.list()).toEqual([]);
+  });
 });

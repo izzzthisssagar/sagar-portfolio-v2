@@ -117,9 +117,7 @@ minioSuite('S3StorageAdapter against MinIO', () => {
     await adapter.delete(key);
     await expect(adapter.get(key)).rejects.toThrow();
 
-    const listing = await rawClient.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: key }),
-    );
+    const listing = await rawClient.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: key }));
     expect(listing.Contents ?? []).toHaveLength(0);
   });
 
@@ -161,4 +159,40 @@ minioSuite('S3StorageAdapter against MinIO', () => {
       badAdapter.put(`${testPrefix}/quarantine/should-fail.png`, Buffer.from('x'), 'image/png'),
     ).rejects.toThrow();
   });
+
+  it('exists() reports true for a written key and false for one never written', async () => {
+    const key = `${testPrefix}/quarantine/exists-check.png`;
+    await put(key, Buffer.from('x'), 'image/png');
+    expect(await adapter.exists(key)).toBe(true);
+    expect(await adapter.exists(`${testPrefix}/quarantine/never-written.png`)).toBe(false);
+  });
+
+  it('list() enumerates every object written under this test prefix (paginated ListObjectsV2)', async () => {
+    const keys = [
+      `${testPrefix}/list-check/a.png`,
+      `${testPrefix}/list-check/b.png`,
+      `${testPrefix}/list-check/nested/c.png`,
+    ];
+    for (const key of keys) {
+      await put(key, Buffer.from('x'), 'image/png');
+    }
+    const allKeys = await adapter.list();
+    for (const key of keys) {
+      expect(allKeys).toContain(key);
+    }
+  });
+
+  it('list() paginates past a single ListObjectsV2 page (MinIO default max-keys is 1000)', async () => {
+    const pageSize = 1000;
+    const count = pageSize + 5;
+    const keys = Array.from(
+      { length: count },
+      (_, i) => `${testPrefix}/paginate/${String(i).padStart(5, '0')}.txt`,
+    );
+    await Promise.all(keys.map((key) => put(key, Buffer.from('x'), 'text/plain')));
+    const allKeys = await adapter.list();
+    for (const key of keys) {
+      expect(allKeys).toContain(key);
+    }
+  }, 30_000);
 });

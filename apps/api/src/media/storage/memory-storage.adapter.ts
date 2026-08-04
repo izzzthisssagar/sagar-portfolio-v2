@@ -31,4 +31,12 @@ export class MemoryStorageAdapter implements MediaStorageAdapter {
   async ping(): Promise<{ ok: boolean }> {
     return { ok: true };
   }
+
+  async exists(key: string): Promise<boolean> {
+    return this.objects.has(key);
+  }
+
+  async list(): Promise<string[]> {
+    return Array.from(this.objects.keys());
+  }
 }

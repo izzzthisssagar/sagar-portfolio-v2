@@ -1,5 +1,14 @@
-import { access, constants, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, sep } from 'node:path';
+import {
+  access,
+  constants,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { dirname, join, normalize, relative, sep } from 'node:path';
 import type { MediaStorageAdapter } from './storage-adapter.interface';
 
 /** Rejects any key that would escape `root` after normalization — the only defense actually
@@ -61,5 +70,36 @@ export class LocalStorageAdapter implements MediaStorageAdapter {
     } catch {
       return { ok: false, detail: 'storage root is not accessible' };
     }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    try {
+      await access(this.resolve(key), constants.R_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async list(): Promise<string[]> {
+    const keys: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(full);
+        } else if (entry.isFile()) {
+          keys.push(relative(this.root, full).split(sep).join('/'));
+        }
+      }
+    };
+    await walk(this.root);
+    return keys;
   }
 }

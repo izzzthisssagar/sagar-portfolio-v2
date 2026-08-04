@@ -20,6 +20,15 @@ export interface MediaStorageAdapter {
    * downloads, or lists real content. Local: confirms the storage root directory exists and is
    * writable. S3-compatible: a HeadBucket call (no object transfer). */
   ping(): Promise<{ ok: boolean; detail?: string }>;
+  /** Lightweight existence check (HEAD-equivalent) — never downloads the object body. Used by
+   * media reconciliation (`pnpm media:reconcile`), not by the upload/approve/archive pipeline
+   * itself. */
+  exists(key: string): Promise<boolean>;
+  /** Full enumeration of every object key currently present in the storage backend — a recursive
+   * directory walk for local storage, a paginated `ListObjectsV2` for S3-compatible storage. Used
+   * only by media reconciliation's orphan-detection pass; never called from a request-serving
+   * code path. */
+  list(): Promise<string[]>;
 }
 
 export const MEDIA_STORAGE = Symbol('MEDIA_STORAGE');
