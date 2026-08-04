@@ -28,7 +28,6 @@ RUN pnpm install --frozen-lockfile
 # ---- build: generate the Prisma client and compile the Nest app --------------------------------
 FROM deps AS build
 COPY prisma prisma
-COPY prisma.config.ts ./
 COPY apps/api apps/api
 RUN pnpm exec prisma generate
 RUN pnpm --filter @portfolio/api run build
@@ -45,6 +44,19 @@ RUN pnpm --filter @portfolio/api deploy --prod --legacy /prod/api
 # producing a `Cannot find module '.prisma/client/default'` crash at runtime. Copy it in
 # explicitly so the deployed tree is actually self-contained.
 RUN cp -r /repo/node_modules/.pnpm/@prisma+client@*/node_modules/.prisma /prod/api/node_modules/.prisma
+
+# ---- migrate: `build` plus prisma.config.ts, for scripts/container-smoke.sh's `prisma migrate
+# deploy` step only — never the production image (the runtime stage below copies from `build`,
+# not from here). A separate stage, added *after* everything above already ran: prisma.config.ts
+# declares `datasource: { url: env('DATABASE_URL') }`, and its mere presence makes every Prisma
+# CLI command eagerly resolve that env var at config-load time — `prisma generate` above
+# correctly runs at image-build time with no real DATABASE_URL (it only needs the schema, not a
+# live connection), and adding this file to the `build` stage directly broke that with "Cannot
+# resolve environment variable: DATABASE_URL." `migrate deploy`, unlike `generate`, actually
+# needs it — and gets it at `docker run` time (`-e DATABASE_URL=...`), by which point this
+# stage's added config file is exactly what makes that resolvable.
+FROM build AS migrate
+COPY prisma.config.ts ./
 
 # ---- runtime: only the deployed, pruned package ------------------------------------------------
 FROM node:${NODE_VERSION}-alpine AS runtime

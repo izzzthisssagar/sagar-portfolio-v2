@@ -39,12 +39,14 @@ docker build -f Dockerfile.api -t portfolio-api:smoke . >/dev/null
 docker build -f Dockerfile.web -t portfolio-web:smoke \
   --build-arg NEXT_PUBLIC_API_URL="http://localhost:${API_PORT}" \
   --build-arg PUBLIC_SITE_URL="http://localhost:${WEB_PORT}" . >/dev/null
-# Dockerfile.api's own intermediate "build" stage already has the full workspace installed, the
-# Prisma client generated, and prisma/migrations copied in — tagging just that stage (a cache hit,
-# since the `docker build` above just built through it) gives a ready-made, self-contained way to
-# run `prisma migrate deploy` against the smoke postgres without installing pnpm/node on the host
-# or publishing postgres's port — matches this script's "needs nothing but Docker" contract.
-docker build -f Dockerfile.api -t portfolio-api:smoke-migrate --target build . >/dev/null
+# Dockerfile.api's own intermediate "migrate" stage already has the full workspace installed,
+# the Prisma client generated, prisma/migrations copied in, and prisma.config.ts (needed by
+# `migrate deploy` specifically, unlike `generate` — see Dockerfile.api) — tagging just that
+# stage (a cache hit, since the `docker build` above just built through its "build" parent) gives
+# a ready-made, self-contained way to run `prisma migrate deploy` against the smoke postgres
+# without installing pnpm/node on the host or publishing postgres's port — matches this script's
+# "needs nothing but Docker" contract.
+docker build -f Dockerfile.api -t portfolio-api:smoke-migrate --target migrate . >/dev/null
 
 echo "--- starting dependencies ---"
 docker network create "$NET" >/dev/null
