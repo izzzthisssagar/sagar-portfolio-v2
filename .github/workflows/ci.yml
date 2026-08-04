@@ -8,7 +8,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17-alpine
@@ -22,6 +22,24 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Real S3-compatible protocol testing (Phase 10) — never a mock. bitnami/minio starts
+      # cleanly from env vars alone (unlike the plain minio/minio image, which needs a `server
+      # /data` command GitHub Actions' `services:` block has no syntax to supply) and
+      # auto-creates MINIO_DEFAULT_BUCKETS on boot, so no separate bucket-init step is needed
+      # here (compare docker-compose.staging.yml's minio-init service, needed there only because
+      # that stack uses the plain image).
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: portfolio-media-test
+        ports: ['9000:9000']
+      # Real SMTP protocol testing (Phase 11) — never a mock. axllent/mailpit needs no command
+      # or extra config to start; 1025 is SMTP, 8025 is the inspection API/UI.
+      mailpit:
+        image: axllent/mailpit
+        ports: ['1025:1025', '8025:8025']
     env:
       DATABASE_URL: postgresql://portfolio:ci-only-password@localhost:5432/sagar_portfolio_test?schema=public
       ACCESS_TOKEN_SECRET: ci-only-access-token-secret-at-least-32-chars
@@ -48,6 +66,24 @@ jobs:
       # Explicit and off — CI must fail visibly on a broken API/content
       # seed rather than silently rendering static fallback project pages.
       ALLOW_STATIC_CONTENT_FALLBACK: 'false'
+      # Real MinIO protocol testing (s3-storage.adapter.integration.test.ts, gated on this exact
+      # var — see docs/media-pipeline.md). Deliberately NOT MEDIA_STORAGE_DRIVER=s3 at job scope:
+      # that would switch every other step (build, e2e) onto the S3 adapter too, which isn't what
+      # this job's non-storage-suite steps need or expect (they're unaffected either way, since
+      # the driver switch only reads MEDIA_STORAGE_DRIVER, but keeping it unset here keeps the
+      # blast radius of this change to exactly the suite that's gated on the endpoint var).
+      MEDIA_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      MEDIA_STORAGE_REGION: us-east-1
+      MEDIA_STORAGE_BUCKET: portfolio-media-test
+      MEDIA_STORAGE_ACCESS_KEY: minioadmin
+      MEDIA_STORAGE_SECRET_KEY: minioadmin
+      # Real Mailpit protocol testing (smtp-notification.adapter.integration.test.ts, gated on
+      # MAILPIT_API_URL — see docs/contact-delivery.md).
+      MAILPIT_API_URL: http://127.0.0.1:8025
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: '1025'
+      SMTP_USERNAME: mailpit
+      SMTP_PASSWORD: mailpit
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -55,13 +91,43 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - name: Wait for MinIO to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live > /dev/null && exit 0
+            sleep 1
+          done
+          echo "MinIO did not become healthy within 30s" >&2
+          exit 1
+      - name: Wait for Mailpit to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8025/api/v1/messages > /dev/null && exit 0
+            sleep 1
+          done
+          echo "Mailpit did not become healthy within 30s" >&2
+          exit 1
       - run: pnpm exec prisma generate
       - run: pnpm exec prisma validate
       - run: pnpm exec prisma migrate deploy
+      - name: Validate runtime configuration (pnpm config:check)
+        run: pnpm config:check
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      # Runs the full unit/integration suite, including the real MinIO and Mailpit protocol
+      # suites (self-skip locally without MEDIA_STORAGE_ENDPOINT/MAILPIT_API_URL — required here).
       - run: pnpm test
+      - name: Install gitleaks
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          sudo tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Secret scan (gitleaks against full tracked git history)
+        run: pnpm secret-scan
+      - name: Dependency audit (high/critical only fails the build)
+        run: pnpm dependency-audit
       - name: Provision a disposable test administrator
         run: pnpm admin:create
       - name: Confirm administrator provisioning refuses a duplicate
@@ -130,6 +196,27 @@ jobs:
       # GET /api/v1/projects/qa-mastery returns the real database record
       # (not apps/web/lib/content.ts static fallback) — see tests/e2e/smoke.spec.ts.
       - run: pnpm test:e2e
-      - run: pnpm audit --audit-level high
+      # Runs last, deliberately: it seeds content and adds disposable fixture rows to the shared
+      # CI database (docs/backup-restore.md) that are never cleaned up afterward — placing it
+      # before the e2e suite above previously left a stray "active" CvDocument fixture in the
+      # database that broke an unrelated CV-not-configured assertion (found by actually running
+      # this rehearsal against a real database while building it).
+      - name: Install postgresql-client (pg_dump/pg_restore/createdb for the backup rehearsal)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: PostgreSQL backup/restore rehearsal
+        run: pnpm db:backup-restore-rehearsal
       - name: Tracked .env file check
         run: test -f .env.example && ! git ls-files | grep -E '(^|/)\.env$'
+
+  containers:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # scripts/container-smoke.sh is fully self-contained — it builds both production images
+      # and spins up its own disposable PostgreSQL/MinIO/Mailpit containers via `docker run`
+      # (never the GitHub Actions `services:` block), so this job needs nothing but Docker,
+      # which ubuntu-latest runners already provide.
+      - name: Build and smoke-test the production containers
+        run: bash scripts/container-smoke.sh

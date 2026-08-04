@@ -16,3 +16,17 @@ ec89a6ec5f5363a16a0263178101f18c517d0dc4:.env.staging.example:generic-api-key:16
 # twice during Sprint 2.
 95d528ec427f8ca77289883870d4d59790ac566f:apps/api/src/auth/password-policy.ts:generic-api-key:7
 db1403f93d95291aa2ee1af58848478965a76158:apps/api/src/auth/password-policy.ts:generic-api-key:7
+
+# Reviewed 2026-08-04 (Phase 25, production-readiness sprint, running this scanner for real):
+
+# .gitleaksignore line 8 (this file): the comment above quotes the earlier-reviewed
+# .env.staging.example placeholder string verbatim for documentation — gitleaks matches that
+# quoted text a second time, in this file. Self-referential false positive, not a new secret.
+3a912bf055bc0b8e2f9bccb30fff49aa4c513e65:.gitleaksignore:generic-api-key:8
+
+# apps/api/scripts/media-reconcile-lib.test.ts lines 98 and 453: the generic-api-key rule's
+# regex fires on any `<identifier containing "key">: '<quoted string>'` pattern — it matched
+# test fixture object properties named `storageKey`/`toKey` whose values are plain synthetic
+# storage-key strings ("approved/missing"), not credentials.
+80627b391c2be09502ab8ba51433a1d458bf3fb2:apps/api/scripts/media-reconcile-lib.test.ts:generic-api-key:98
+80627b391c2be09502ab8ba51433a1d458bf3fb2:apps/api/scripts/media-reconcile-lib.test.ts:generic-api-key:453
