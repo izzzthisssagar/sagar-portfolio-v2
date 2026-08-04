@@ -246,8 +246,12 @@ jobs:
       # rehearsal against a real database while building it). The Lighthouse gate below reuses
       # this same already-running, already-seeded API afterward, so it also needs to run after
       # this step rather than before.
-      - name: Install postgresql-client (pg_dump/pg_restore/createdb for the backup rehearsal)
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      # postgresql-client (no version suffix) resolves to v16 on this runner image, but pg_dump
+      # refuses to dump from a *newer* major-version server than itself ("aborting because of
+      # server version mismatch") — and the postgres service above is pinned to 17-alpine.
+      # postgresql-client-17 is available from the same already-configured PGDG apt source.
+      - name: Install postgresql-client-17 (pg_dump/pg_restore/createdb for the backup rehearsal)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-17
       - name: PostgreSQL backup/restore rehearsal
         run: pnpm db:backup-restore-rehearsal
       # Real production build (never `next dev`), real seeded database, the actual standalone

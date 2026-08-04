@@ -39,6 +39,12 @@ docker build -f Dockerfile.api -t portfolio-api:smoke . >/dev/null
 docker build -f Dockerfile.web -t portfolio-web:smoke \
   --build-arg NEXT_PUBLIC_API_URL="http://localhost:${API_PORT}" \
   --build-arg PUBLIC_SITE_URL="http://localhost:${WEB_PORT}" . >/dev/null
+# Dockerfile.api's own intermediate "build" stage already has the full workspace installed, the
+# Prisma client generated, and prisma/migrations copied in — tagging just that stage (a cache hit,
+# since the `docker build` above just built through it) gives a ready-made, self-contained way to
+# run `prisma migrate deploy` against the smoke postgres without installing pnpm/node on the host
+# or publishing postgres's port — matches this script's "needs nothing but Docker" contract.
+docker build -f Dockerfile.api -t portfolio-api:smoke-migrate --target build . >/dev/null
 
 echo "--- starting dependencies ---"
 docker network create "$NET" >/dev/null
@@ -66,6 +72,12 @@ for i in $(seq 1 60); do
   sleep 1
 done
 [ "$consecutive_ready" -ge 3 ] || fail "postgres did not become stably ready"
+
+echo "--- running database migrations against the smoke postgres ---"
+docker run --rm --network "$NET" \
+  -e DATABASE_URL="postgresql://postgres:postgres@${PG}:5432/portfolio_smoke" \
+  portfolio-api:smoke-migrate \
+  pnpm exec prisma migrate deploy >/dev/null || fail "database migration failed"
 
 docker run --rm --network "$NET" --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
   mc alias set local http://${MINIO}:9000 minioadmin minioadmin &&
