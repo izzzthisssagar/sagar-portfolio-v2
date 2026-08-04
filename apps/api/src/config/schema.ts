@@ -1,10 +1,20 @@
 import { z } from 'zod';
 
+/** Strict — accepts only the literal strings `"true"`/`"false"` (or unset, which uses
+ * `defaultValue`). Anything else ("TRUE", "1", "yes", "tru", "") is a validation error, not a
+ * silent `false` — a typo'd or truthy-looking-but-wrong boolean env var must fail loudly, never
+ * quietly disable whatever it was supposed to enable. */
 const bool = (defaultValue: boolean) =>
   z
     .string()
     .optional()
-    .transform((v) => (v === undefined ? defaultValue : v === 'true'));
+    .transform((v, ctx) => {
+      if (v === undefined) return defaultValue;
+      if (v === 'true') return true;
+      if (v === 'false') return false;
+      ctx.addIssue({ code: 'custom', message: `must be exactly "true" or "false", got "${v}"` });
+      return z.NEVER;
+    });
 
 const boundedInt = (min: number, max: number, defaultValue: number) =>
   z

@@ -13,8 +13,15 @@ export interface ConfigResult {
  * development-friendly local/capture defaults. Kept as plain checks rather than zod refinements
  * because they read across the composed schema's categories (core.NODE_ENV against media/contact
  * driver selection), which a single flat superRefine expresses more clearly than a cross-object
- * zod intersection would. */
-function productionOnlyErrors(env: ApiEnv): string[] {
+ * zod intersection would.
+ *
+ * Takes the *raw* env alongside the parsed one specifically for WEB_URL/API_URL: both have a
+ * schema-level default (WEB_URL) or stay optional (API_URL) so development/test/CI need not set
+ * them, which means the parsed value alone can never tell "the user explicitly set this" apart
+ * from "the schema silently filled it in" — checking `rawEnv.WEB_URL`/`rawEnv.API_URL` directly
+ * is the only way to fail closed on a production deploy that never set them at all, rather than
+ * quietly booting against `http://localhost:3000` or with Host enforcement disabled. */
+function productionOnlyErrors(env: ApiEnv, rawEnv: NodeJS.ProcessEnv): string[] {
   if (env.NODE_ENV !== 'production') return [];
   const errors: string[] = [];
   if (!env.MEDIA_STORAGE_DRIVER) {
@@ -30,6 +37,18 @@ function productionOnlyErrors(env: ApiEnv): string[] {
     );
   } else if (env.CONTACT_NOTIFICATION_DRIVER !== 'smtp') {
     errors.push('CONTACT_NOTIFICATION_DRIVER: must be "smtp" in production');
+  }
+  if (!rawEnv.WEB_URL?.trim()) {
+    errors.push(
+      'WEB_URL: is required in production — refusing to silently default to http://localhost:3000, ' +
+        'which is also the expected browser Origin for CSRF enforcement (see auth/csrf.guard.ts)',
+    );
+  }
+  if (!rawEnv.API_URL?.trim()) {
+    errors.push(
+      'API_URL: is required in production — used as the expected Host for CSRF enforcement ' +
+        '(see auth/csrf.guard.ts); the API must not start in production without it',
+    );
   }
   return errors;
 }
@@ -50,7 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigResult {
   if (!parsed.success) {
     return { ok: false, config: null, errors: formatZodErrors(parsed.error.issues) };
   }
-  const productionErrors = productionOnlyErrors(parsed.data);
+  const productionErrors = productionOnlyErrors(parsed.data, env);
   if (productionErrors.length) {
     return { ok: false, config: null, errors: productionErrors };
   }

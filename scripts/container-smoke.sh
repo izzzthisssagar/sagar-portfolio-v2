@@ -103,6 +103,7 @@ docker run -d --name "$API" --network "$NET" -p "${API_PORT}:4000" \
   -e ACCESS_TOKEN_AUDIENCE="portfolio-smoke" \
   -e REFRESH_TOKEN_SECRET="smoke-test-refresh-token-secret-value-32ch" \
   -e WEB_URL="http://localhost:${WEB_PORT}" \
+  -e API_URL="http://localhost:${API_PORT}" \
   -e MEDIA_STORAGE_DRIVER="s3" \
   -e MEDIA_STORAGE_ENDPOINT="http://${MINIO}:9000" \
   -e MEDIA_STORAGE_REGION="us-east-1" \

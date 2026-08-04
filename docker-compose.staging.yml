@@ -123,6 +123,12 @@ services:
       ACCESS_TOKEN_AUDIENCE: ${ACCESS_TOKEN_AUDIENCE}
       REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET}
       WEB_URL: ${WEB_URL}
+      # The API's own externally-reachable host — required in production (NODE_ENV=production,
+      # set above) since config/index.ts's productionOnlyErrors now fails closed without it;
+      # CsrfGuard uses this as the expected Host for incoming requests. Matches
+      # MEDIA_STORAGE_PUBLIC_BASE_URL below: API_PORT is published to the host (`ports:` above),
+      # so that's genuinely how a caller reaches this container from outside the compose network.
+      API_URL: http://localhost:${API_PORT}
       # Production-like S3 adapter, enabled against MinIO — never the local filesystem adapter.
       MEDIA_STORAGE_DRIVER: s3
       MEDIA_STORAGE_ENDPOINT: http://minio:9000

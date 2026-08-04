@@ -41,6 +41,28 @@ describe('loadConfig — core', () => {
     expect(result.errors.join(' ')).toContain('WEB_URL');
   });
 
+  it('rejects a malformed API_URL', () => {
+    const result = loadConfig({ ...validEnv, API_URL: 'not-a-url' });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('API_URL');
+  });
+
+  it('defaults WEB_URL to http://localhost:3000 when unset outside production', () => {
+    const { WEB_URL, ...rest } = validEnv;
+    void WEB_URL;
+    const result = loadConfig({ ...rest, NODE_ENV: 'development' });
+    expect(result.ok).toBe(true);
+    expect(result.config?.WEB_URL).toBe('http://localhost:3000');
+  });
+
+  it('leaves API_URL undefined when unset outside production', () => {
+    const { API_URL, ...rest } = validEnv;
+    void API_URL;
+    const result = loadConfig({ ...rest, NODE_ENV: 'development' });
+    expect(result.ok).toBe(true);
+    expect(result.config?.API_URL).toBeUndefined();
+  });
+
   it('rejects an out-of-range PORT', () => {
     expect(loadConfig({ ...validEnv, PORT: '0' }).ok).toBe(false);
     expect(loadConfig({ ...validEnv, PORT: '70000' }).ok).toBe(false);
@@ -129,6 +151,130 @@ describe('loadConfig — media storage', () => {
     expect(loadConfig({ ...validEnv, MEDIA_MAX_IMAGE_BYTES: String(1024 * 1024 * 1024) }).ok).toBe(
       false,
     );
+  });
+});
+
+/** A fully production-ready env — every other production-only requirement satisfied — so tests
+ * below can isolate exactly one missing/invalid field at a time without unrelated production
+ * errors (MEDIA_STORAGE_DRIVER, CONTACT_NOTIFICATION_DRIVER) also firing and muddying the
+ * assertion. */
+const productionReadyEnv: NodeJS.ProcessEnv = {
+  ...validEnv,
+  NODE_ENV: 'production',
+  MEDIA_STORAGE_DRIVER: 's3',
+  MEDIA_STORAGE_REGION: 'us-east-1',
+  MEDIA_STORAGE_BUCKET: 'bucket',
+  MEDIA_STORAGE_ACCESS_KEY: 'key',
+  MEDIA_STORAGE_SECRET_KEY: 'secret',
+  CONTACT_NOTIFICATION_DRIVER: 'smtp',
+  SMTP_HOST: 'smtp.example.invalid',
+  SMTP_PORT: '587',
+  SMTP_USERNAME: 'u',
+  SMTP_PASSWORD: 'p',
+  SMTP_FROM: 'from@example.invalid',
+  CONTACT_NOTIFICATION_TO: 'to@example.invalid',
+};
+
+describe('loadConfig — production WEB_URL/API_URL requirements', () => {
+  it('accepts a fully production-ready environment (sanity check for the fixture itself)', () => {
+    const result = loadConfig(productionReadyEnv);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects production with WEB_URL unset — never silently defaults to localhost', () => {
+    const { WEB_URL, ...rest } = productionReadyEnv;
+    void WEB_URL;
+    const result = loadConfig(rest);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('WEB_URL');
+  });
+
+  it('rejects production with WEB_URL set to an empty string', () => {
+    const result = loadConfig({ ...productionReadyEnv, WEB_URL: '' });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('WEB_URL');
+  });
+
+  it('rejects production with API_URL unset — the API must not start without it', () => {
+    const { API_URL, ...rest } = productionReadyEnv;
+    void API_URL;
+    const result = loadConfig(rest);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('API_URL');
+  });
+
+  it('rejects production with a malformed WEB_URL', () => {
+    const result = loadConfig({ ...productionReadyEnv, WEB_URL: 'not-a-url' });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('WEB_URL');
+  });
+
+  it('rejects production with a malformed API_URL', () => {
+    const result = loadConfig({ ...productionReadyEnv, API_URL: 'not-a-url' });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('API_URL');
+  });
+
+  it('accepts production with both WEB_URL and API_URL explicitly, validly set', () => {
+    const result = loadConfig({
+      ...productionReadyEnv,
+      WEB_URL: 'https://app.example.com',
+      API_URL: 'https://api.example.com',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.config?.WEB_URL).toBe('https://app.example.com');
+    expect(result.config?.API_URL).toBe('https://api.example.com');
+  });
+});
+
+describe('loadConfig — strict boolean parsing (SMTP_SECURE, METRICS_ENABLED)', () => {
+  const invalidBooleanStrings = ['TRUE', 'FALSE', '1', '0', 'yes', 'no', 'tru', ''];
+
+  it.each(invalidBooleanStrings)('rejects SMTP_SECURE=%s', (value) => {
+    const result = loadConfig({ ...validEnv, SMTP_SECURE: value });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('SMTP_SECURE');
+  });
+
+  it.each(invalidBooleanStrings)('rejects METRICS_ENABLED=%s', (value) => {
+    const result = loadConfig({ ...validEnv, METRICS_ENABLED: value });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('METRICS_ENABLED');
+  });
+
+  it('accepts the exact literal "true" for SMTP_SECURE', () => {
+    const result = loadConfig({ ...validEnv, SMTP_SECURE: 'true' });
+    expect(result.ok).toBe(true);
+    expect(result.config?.SMTP_SECURE).toBe(true);
+  });
+
+  it('accepts the exact literal "false" for SMTP_SECURE', () => {
+    const result = loadConfig({ ...validEnv, SMTP_SECURE: 'false' });
+    expect(result.ok).toBe(true);
+    expect(result.config?.SMTP_SECURE).toBe(false);
+  });
+
+  it('accepts the exact literal "true" for METRICS_ENABLED (with a valid token)', () => {
+    const result = loadConfig({
+      ...validEnv,
+      METRICS_ENABLED: 'true',
+      METRICS_TOKEN: 'a'.repeat(16),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.config?.METRICS_ENABLED).toBe(true);
+  });
+
+  it('accepts the exact literal "false" for METRICS_ENABLED', () => {
+    const result = loadConfig({ ...validEnv, METRICS_ENABLED: 'false' });
+    expect(result.ok).toBe(true);
+    expect(result.config?.METRICS_ENABLED).toBe(false);
+  });
+
+  it('defaults SMTP_SECURE to false and METRICS_ENABLED to false when unset', () => {
+    const result = loadConfig(validEnv);
+    expect(result.ok).toBe(true);
+    expect(result.config?.SMTP_SECURE).toBe(false);
+    expect(result.config?.METRICS_ENABLED).toBe(false);
   });
 });
 

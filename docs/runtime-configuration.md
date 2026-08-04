@@ -28,13 +28,13 @@ two enforcement sites for historical/testing reasons, not two different policies
 
 ### Core
 
-| Variable       | Required | Default                 | Notes                                                       |
-| -------------- | -------- | ----------------------- | ----------------------------------------------------------- |
-| `NODE_ENV`     | no       | `development`           | `development` \| `test` \| `production`                     |
-| `DATABASE_URL` | **yes**  | —                       | must start with `postgres`                                  |
-| `WEB_URL`      | no       | `http://localhost:3000` | must be a valid URL                                         |
-| `API_URL`      | no       | —                       | must be a valid URL when set; used for CSRF Host validation |
-| `PORT`         | no       | `4000`                  | 1–65535                                                     |
+| Variable       | Required            | Default                                 | Notes                                                             |
+| -------------- | ------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| `NODE_ENV`     | no                  | `development`                           | `development` \| `test` \| `production`                           |
+| `DATABASE_URL` | **yes**             | —                                       | must start with `postgres`                                        |
+| `WEB_URL`      | **production: yes** | `http://localhost:3000` (dev/test only) | must be a valid URL; expected browser Origin for CSRF enforcement |
+| `API_URL`      | **production: yes** | — (dev/test: unset)                     | must be a valid URL; expected API Host for CSRF enforcement       |
+| `PORT`         | no                  | `4000`                                  | 1–65535                                                           |
 
 ### Authentication
 
@@ -72,7 +72,14 @@ two enforcement sites for historical/testing reasons, not two different policies
 | `CONTACT_NOTIFICATION_DRIVER`                               | production only             | `capture` \| `smtp`; production must set `smtp` |
 | `CONTACT_NOTIFICATION_TO`                                   | required when driver=`smtp` | valid email                                     |
 | `SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_FROM` | required when driver=`smtp` | `SMTP_PORT` 1–65535                             |
-| `SMTP_SECURE`                                               | no                          | `true`/`false`, default `false`                 |
+| `SMTP_SECURE`                                               | no                          | exactly `true` or `false`, default `false`      |
+
+### Metrics
+
+| Variable          | Required                             | Default | Notes                                                                                                                                                |
+| ----------------- | ------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `METRICS_ENABLED` | no                                   | `false` | exactly `true` or `false`; endpoint 404s whenever this is not `true`                                                                                 |
+| `METRICS_TOKEN`   | required when `METRICS_ENABLED=true` | —       | ≥16 chars; presented token is compared via SHA-256 digest + `timingSafeEqual`, never as raw bytes — see `apps/api/src/metrics/metrics.controller.ts` |
 
 ### Operational
 
@@ -103,10 +110,24 @@ two enforcement sites for historical/testing reasons, not two different policies
   name and a static reason.
 - Every numeric variable rejects zero, negative, non-numeric, and unreasonably large values
   (bounded, not just "positive").
-- Production-only requirements (`MEDIA_STORAGE_DRIVER=s3`, `CONTACT_NOTIFICATION_DRIVER=smtp`)
-  apply **only** when `NODE_ENV=production` — CI and local development explicitly do not set
-  `NODE_ENV=production`, so they keep the local/capture fallbacks without needing every
-  production secret.
+- **Boolean variables are strict.** The `bool()` helper (`apps/api/src/config/schema.ts`) accepts
+  only the exact strings `"true"`, `"false"`, or an unset value (which falls back to the
+  documented default) — anything else (`TRUE`, `1`, `0`, `yes`, `no`, `tru`, an empty string, ...)
+  fails validation with a field-specific error rather than silently coercing to `false`. Applies
+  to `SMTP_SECURE` and `METRICS_ENABLED`.
+- **`WEB_URL` and `API_URL` are required and validated whenever `NODE_ENV=production`.** Production
+  never falls back to `http://localhost:3000` for `WEB_URL`, and never boots without `API_URL` —
+  both fail closed with a clear error at startup (`loadConfigOrThrow`/`config:check`) rather than
+  silently degrading CSRF protection. `CsrfGuard` (`apps/api/src/auth/csrf.guard.ts`) reads these
+  from the validated config layer, not raw `process.env`: `WEB_URL` is the expected browser
+  `Origin`, `API_URL`'s host is the expected `Host` header. Outside production, both keep their
+  documented dev/test defaults/fallbacks (`API_URL` unset means Host enforcement is skipped,
+  which is what lets in-process Supertest integration tests hit an ephemeral host without being
+  mistaken for the real API).
+- Production-only requirements (`MEDIA_STORAGE_DRIVER=s3`, `CONTACT_NOTIFICATION_DRIVER=smtp`,
+  `WEB_URL`/`API_URL`) apply **only** when `NODE_ENV=production` — CI and local development
+  explicitly do not set `NODE_ENV=production`, so they keep the local/capture fallbacks without
+  needing every production secret.
 - `RATE_LIMIT_MAX` still defaults to `60` — the same production number Sprint 3 shipped. Only CI's
   own disposable API process (started by `playwright.config.ts` / `.github/workflows/ci.yml`)
   raises it, to 300 — see `docs/security-production.md` for why, and for the route-specific
