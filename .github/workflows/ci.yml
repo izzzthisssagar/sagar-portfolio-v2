@@ -8,10 +8,12 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
+      # Pinned tag@digest — see scripts/lib/pinned-images.sh, the single source of truth shared
+      # with docker-compose.staging.yml and scripts/container-smoke.sh.
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
         env:
           POSTGRES_DB: sagar_portfolio_test
           POSTGRES_USER: portfolio
@@ -22,23 +24,10 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
-      # Real S3-compatible protocol testing (Phase 10) — never a mock. bitnami/minio starts
-      # cleanly from env vars alone (unlike the plain minio/minio image, which needs a `server
-      # /data` command GitHub Actions' `services:` block has no syntax to supply) and
-      # auto-creates MINIO_DEFAULT_BUCKETS on boot, so no separate bucket-init step is needed
-      # here (compare docker-compose.staging.yml's minio-init service, needed there only because
-      # that stack uses the plain image).
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: portfolio-media-test
-        ports: ['9000:9000']
-      # Real SMTP protocol testing (Phase 11) — never a mock. axllent/mailpit needs no command
-      # or extra config to start; 1025 is SMTP, 8025 is the inspection API/UI.
+      # Real SMTP protocol testing (Phase 11) — never a mock. axllent/mailpit needs no command or
+      # extra config to start; 1025 is SMTP, 8025 is the inspection API/UI.
       mailpit:
-        image: axllent/mailpit
+        image: axllent/mailpit:v1.30.6@sha256:7f33095f80e901f6ad08028f06ca284aa58fe84942be5496008d041d3b9f4d4d
         ports: ['1025:1025', '8025:8025']
     env:
       DATABASE_URL: postgresql://portfolio:ci-only-password@localhost:5432/sagar_portfolio_test?schema=public
@@ -84,6 +73,20 @@ jobs:
       SMTP_PORT: '1025'
       SMTP_USERNAME: mailpit
       SMTP_PASSWORD: mailpit
+      # E2E-only global rate-limit override (apps/api/src/app.module.ts's globalRateLimit()) —
+      # measured suite volume is ~300 requests total; 2000 keeps ~6x headroom. Never affects the
+      # strict per-route budgets (login/refresh/contact/media-upload), see
+      # apps/api/test/rate-limit-e2e-override.api.integration.test.ts and
+      # docs/performance-release-gates.md / playwright.config.ts for the full rationale.
+      RATE_LIMIT_MAX: '2000'
+      # CI deliberately pre-starts the API (see "Start the API server" below) ahead of `pnpm
+      # build`, then Playwright attaches to that same already-running, already-seeded process
+      # instead of spawning its own — see playwright.config.ts.
+      E2E_REUSE_API_SERVER: 'true'
+      # CI-only metrics token, used by the "Metrics endpoint smoke check" step below. Not a
+      # production secret — this process is disposed of at the end of the job.
+      METRICS_ENABLED: 'true'
+      METRICS_TOKEN: ci-only-metrics-token-value-32-characters-long
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -91,6 +94,17 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - name: Pin-image preflight (postgres, minio, mc, mailpit all pullable)
+        run: pnpm images:preflight
+      # A normal step, not a GitHub Actions `services:` container — `services:` has no syntax to
+      # supply MinIO's required `server /data --console-address :9001` command.
+      - name: Start MinIO
+        run: |
+          # shellcheck source=scripts/lib/pinned-images.sh
+          source scripts/lib/pinned-images.sh
+          docker run -d --name ci-minio -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            "$MINIO_SERVER_IMAGE" server /data --console-address :9001
       - name: Wait for MinIO to accept connections
         run: |
           for i in $(seq 1 30); do
@@ -99,6 +113,15 @@ jobs:
           done
           echo "MinIO did not become healthy within 30s" >&2
           exit 1
+      - name: Create and verify the CI MinIO bucket
+        run: |
+          # shellcheck source=scripts/lib/pinned-images.sh
+          source scripts/lib/pinned-images.sh
+          docker run --rm --network host --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
+            mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin &&
+            mc mb --ignore-existing ci/portfolio-media-test &&
+            mc ls ci/portfolio-media-test > /dev/null
+          "
       - name: Wait for Mailpit to accept connections
         run: |
           for i in $(seq 1 30); do
@@ -153,18 +176,16 @@ jobs:
       # page, /work, and /work/[slug]'s generateStaticParams) now needs a
       # real, reachable API instead of silently degrading to fallback
       # content — exactly the behavior this sprint set out to require.
-      # Playwright's webServer config (`reuseExistingServer: true`) detects
-      # and reuses this same already-running server later for `test:e2e`.
+      # Playwright's webServer config (`E2E_REUSE_API_SERVER=true`, job env
+      # above) detects and reuses this same already-running server later for
+      # `test:e2e`, and the Lighthouse gate reuses it again after that.
+      # Output redirected to a file so it can be uploaded as a safe debugging
+      # artifact if a later step fails (see the failure-artifact step below)
+      # — this app's structured logger never logs secrets/passwords/tokens.
       - name: Start the API server
-        run: pnpm --filter @portfolio/api exec nest start &
+        run: pnpm --filter @portfolio/api exec nest start > api-server.log 2>&1 &
         env:
           API_URL: http://127.0.0.1:4000
-          # Raises only this CI instance's app-wide rate-limit budget (production default,
-          # apps/api/src/app.module.ts, stays 60 req/60s/IP) — the sequential 25-spec Playwright
-          # suite that reuses this same server can exceed 60 of its own necessary request volume
-          # within a single 60s window on its own; see docs/sprint-3.md "Known limitations" and
-          # playwright.config.ts.
-          RATE_LIMIT_MAX: '300'
       - name: Wait for the API to become healthy
         run: |
           for i in $(seq 1 30); do
@@ -187,6 +208,8 @@ jobs:
             }
             console.log("OK - qa-mastery served from DB record", data.id);
           ' "$body"
+      - name: Metrics endpoint smoke check (disabled/wrong-token refusal, correct-token exposition)
+        run: pnpm metrics:smoke -- --api-base-url=http://127.0.0.1:4000 --token="$METRICS_TOKEN"
       - run: pnpm build
         env:
           API_URL: http://127.0.0.1:4000
@@ -195,25 +218,70 @@ jobs:
       # fails loudly if it doesn't land, and the smoke suite asserts
       # GET /api/v1/projects/qa-mastery returns the real database record
       # (not apps/web/lib/content.ts static fallback) — see tests/e2e/smoke.spec.ts.
-      - run: pnpm test:e2e
-      # Runs last, deliberately: it seeds content and adds disposable fixture rows to the shared
-      # CI database (docs/backup-restore.md) that are never cleaned up afterward — placing it
-      # before the e2e suite above previously left a stray "active" CvDocument fixture in the
-      # database that broke an unrelated CV-not-configured assertion (found by actually running
-      # this rehearsal against a real database while building it).
+      # 61 specs, deterministically 61/61 — see docs/sprint-4.md "E2E rate-limit headroom" for how
+      # the earlier flaky-login/table-overflow failures were actually root-caused and fixed (not
+      # retried around).
+      - name: Playwright end-to-end suite (61 specs)
+        run: pnpm test:e2e
+      - name: Upload Playwright report and traces (on failure only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+            api-server.log
+          retention-days: 7
+      # Runs after the e2e suite (not before): it seeds content and adds disposable fixture rows
+      # to the shared CI database (docs/backup-restore.md) that are never cleaned up afterward —
+      # placing it earlier previously left a stray "active" CvDocument fixture in the database
+      # that broke an unrelated CV-not-configured assertion (found by actually running this
+      # rehearsal against a real database while building it). The Lighthouse gate below reuses
+      # this same already-running, already-seeded API afterward, so it also needs to run after
+      # this step rather than before.
       - name: Install postgresql-client (pg_dump/pg_restore/createdb for the backup rehearsal)
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: PostgreSQL backup/restore rehearsal
         run: pnpm db:backup-restore-rehearsal
+      # Real production build (never `next dev`), real seeded database, the actual standalone
+      # server — see docs/performance-release-gates.md. Reuses the `pnpm build` output from
+      # earlier in this same job (LIGHTHOUSE_SKIP_BUILD — that build never got exercised since
+      # the e2e suite above runs against the dev server, not this one) and the Chromium installed
+      # above for the e2e suite.
+      - name: Lighthouse CI gate (6 pages, budgets in docs/performance-release-gates.md)
+        run: pnpm lighthouse:ci
+        env:
+          API_URL: http://127.0.0.1:4000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+          PUBLIC_SITE_URL: http://127.0.0.1:3000
+          LIGHTHOUSE_SKIP_BUILD: 'true'
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: lighthouse-results/
+          retention-days: 7
       - name: Tracked .env file check
         run: test -f .env.example && ! git ls-files | grep -E '(^|/)\.env$'
+      - name: Clean up the CI MinIO container
+        if: always()
+        run: docker rm -f ci-minio >/dev/null 2>&1 || true
 
+  # Independent of `verify` on purpose (no `needs:`) — a broken lint rule or a flaky unit test
+  # must never hide a broken production image build. This job runs on every pull request
+  # regardless of whether `verify` passes, so GitHub always has separate evidence for application
+  # verification (the job above) vs. production image builds/startup/dependency health/graceful
+  # shutdown (this job) — see scripts/container-smoke.sh. The overall workflow still shows
+  # red if either job fails; only the evidence stays independent.
   containers:
-    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Pin-image preflight (postgres, minio, mc, mailpit all pullable)
+        run: bash scripts/image-preflight.sh
       # scripts/container-smoke.sh is fully self-contained — it builds both production images
       # and spins up its own disposable PostgreSQL/MinIO/Mailpit containers via `docker run`
       # (never the GitHub Actions `services:` block), so this job needs nothing but Docker,

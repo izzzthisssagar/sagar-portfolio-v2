@@ -23,7 +23,10 @@ volumes:
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Pinned tag@digest — see scripts/lib/pinned-images.sh, the single source of truth for every
+    # infrastructure image this repo pulls (CI, staging, container smoke). No intentional version
+    # skew between them.
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     restart: unless-stopped
     networks: [staging]
     # Published to the host so `staging:up` can run `prisma migrate deploy` from outside the
@@ -43,7 +46,10 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio
+    # Pinned tag@digest — see scripts/lib/pinned-images.sh. minio/minio stopped publishing new
+    # public Docker Hub releases after this tag (MinIO moved later AGPLv3 community releases
+    # behind a login wall) — this is the newest tag Docker Hub actually serves, not a stale pin.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     networks: [staging]
     command: server /data --console-address ":9001"
@@ -61,7 +67,8 @@ services:
   # Disposable-staging-only bucket provisioning — never how a real production bucket gets
   # created. Runs once to completion and exits; not kept alive.
   minio-init:
-    image: minio/mc
+    # Pinned tag@digest — see scripts/lib/pinned-images.sh.
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     networks: [staging]
     depends_on:
       minio:
@@ -81,7 +88,8 @@ services:
   # adapter is pointed at this container so contact-form delivery can be verified end to end
   # without ever sending real mail. See docs/contact-delivery.md.
   mailpit:
-    image: axllent/mailpit
+    # Pinned tag@digest — see scripts/lib/pinned-images.sh.
+    image: axllent/mailpit:v1.30.6@sha256:7f33095f80e901f6ad08028f06ca284aa58fe84942be5496008d041d3b9f4d4d
     restart: unless-stopped
     networks: [staging]
     ports:

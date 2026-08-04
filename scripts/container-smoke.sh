@@ -6,6 +6,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+# shellcheck source=lib/pinned-images.sh
+source scripts/lib/pinned-images.sh
 
 NET="portfolio-smoke-net-$$"
 PG="smoke-pg-$$"
@@ -40,11 +42,11 @@ echo "--- starting dependencies ---"
 docker network create "$NET" >/dev/null
 docker run -d --name "$PG" --network "$NET" \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=portfolio_smoke \
-  postgres:16-alpine >/dev/null
+  "$POSTGRES_IMAGE" >/dev/null
 docker run -d --name "$MINIO" --network "$NET" \
   -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-  minio/minio server /data >/dev/null
-docker run -d --name "$MAILPIT" --network "$NET" axllent/mailpit >/dev/null
+  "$MINIO_SERVER_IMAGE" server /data --console-address :9001 >/dev/null
+docker run -d --name "$MAILPIT" --network "$NET" "$MAILPIT_IMAGE" >/dev/null
 
 for i in $(seq 1 30); do
   docker exec "$PG" pg_isready -U postgres >/dev/null 2>&1 && break
@@ -52,7 +54,7 @@ for i in $(seq 1 30); do
 done
 docker exec "$PG" pg_isready -U postgres >/dev/null 2>&1 || fail "postgres did not become ready"
 
-docker run --rm --network "$NET" --entrypoint sh minio/mc -c "
+docker run --rm --network "$NET" --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
   mc alias set local http://${MINIO}:9000 minioadmin minioadmin &&
   mc mb local/portfolio-media-smoke
 " >/dev/null || fail "could not provision the MinIO smoke bucket"

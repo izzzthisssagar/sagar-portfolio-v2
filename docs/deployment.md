@@ -72,6 +72,19 @@ docker build -f Dockerfile.web -t portfolio-web \
 that make an image deployable: both start, the API reaches a real PostgreSQL, health/homepage
 respond, and SIGTERM stops each container cleanly (exit 0) rather than requiring a SIGKILL.
 
+### Pinned infrastructure images
+
+Every infrastructure image this repo pulls — PostgreSQL, the MinIO server, the MinIO client
+(`mc`), Mailpit — is pinned to an exact `tag@digest`, never `:latest`, and is the _same_ pin in
+`.github/workflows/ci.yml`, `docker-compose.staging.yml`, and `scripts/container-smoke.sh`.
+`scripts/lib/pinned-images.sh` is the single source of truth those shell-based consumers `source`
+directly; the two YAML files hardcode the identical strings (YAML can't source a shell file) —
+grep that file's values against those two if you suspect drift. `pnpm images:preflight`
+(`scripts/image-preflight.sh`) pulls all four and fails fast with a clear message if any pin has
+gone stale, rather than that surfacing later as a confusing service-container or `docker run`
+timeout. Every digest pinned is the multi-architecture manifest-list digest, so the same pin
+resolves correctly on GitHub's amd64 runners and on Apple Silicon (arm64) local development.
+
 ## Staging: a production-like local rehearsal
 
 `docker-compose.staging.yml` runs the actual production images against real PostgreSQL, real
