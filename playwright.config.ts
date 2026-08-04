@@ -34,7 +34,7 @@ const webServer: NonNullable<PlaywrightTestConfig['webServer']> = [
     ? [
         {
           command: 'pnpm --filter @portfolio/api exec nest start',
-          url: 'http://127.0.0.1:4000/api/v1/health',
+          url: 'http://127.0.0.1:4000/api/v1/health/live',
           reuseExistingServer: true,
           timeout: 60_000,
           env: { ...sharedEnv, PORT: '4000' },

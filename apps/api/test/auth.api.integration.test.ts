@@ -680,7 +680,7 @@ databaseSuite('Authentication vertical', () => {
     expect(crossOrigin.body.error.code).toBe('CSRF_ORIGIN_REJECTED');
 
     await request(app.getHttpServer())
-      .get('/api/v1/health')
+      .get('/api/v1/health/live')
       .set('Origin', 'https://evil.example')
       .expect(200);
   });

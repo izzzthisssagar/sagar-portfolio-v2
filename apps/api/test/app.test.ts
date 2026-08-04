@@ -29,7 +29,7 @@ describe('API v1 contracts', () => {
   afterAll(() => app.close());
   it('exposes health and stable paginated public projects', async () => {
     await request(app.getHttpServer())
-      .get('/api/v1/health')
+      .get('/api/v1/health/live')
       .expect(200)
       .expect(({ body }) => expect(body.status).toBe('ok'));
     await request(app.getHttpServer())
@@ -67,7 +67,7 @@ describe('API v1 contracts', () => {
 
   it('honors a well-formed caller-supplied request id instead of generating a new one', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/health')
+      .get('/api/v1/health/live')
       .set('x-request-id', 'caller-supplied-abc-123')
       .expect(200);
     expect(res.headers['x-request-id']).toBe('caller-supplied-abc-123');
@@ -75,7 +75,7 @@ describe('API v1 contracts', () => {
 
   it('replaces an unsafe caller-supplied request id rather than reflecting it verbatim', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/health')
+      .get('/api/v1/health/live')
       .set('x-request-id', 'has spaces and <tags>')
       .expect(200);
     expect(res.headers['x-request-id']).not.toBe('has spaces and <tags>');

@@ -1,12 +1,4 @@
-import {
-  ArgumentsHost,
-  Catch,
-  Controller,
-  ExceptionFilter,
-  Get,
-  HttpException,
-} from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { resolveRequestId } from './logging/request-id';
 import type { StructuredLogger } from './logging/structured-logger';
@@ -66,12 +58,5 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
       console.error('Unhandled exception', exception);
     }
     response.status(status).json({ error: { code, message, requestId } });
-  }
-}
-@Controller()
-@SkipThrottle()
-export class HealthController {
-  @Get('health') health() {
-    return { status: 'ok', service: 'portfolio-api', version: 'v1' };
   }
 }
