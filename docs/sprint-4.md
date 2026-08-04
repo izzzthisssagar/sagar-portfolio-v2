@@ -69,4 +69,27 @@ documentation. This file is the index and the scope record.
 
 account of what shipped)
 
-This section is filled in as each phase completes.
+**Real** (verified by actually running it, not just reviewed): centralized config validation
+(`pnpm config:check`); liveness/readiness/details health endpoints with graceful shutdown; JSON
+structured logging with recursive redaction and request-id correlation; security headers, CORS,
+trusted-proxy handling, and route-aware rate limits; production `Dockerfile.api`/`Dockerfile.web`
+plus the `docker-compose.staging.yml` staging stack; `scripts/deployment-smoke.mjs` (canonical
+link, JSON-LD, full header set, CORS, static-fallback cross-check); database backup/restore/
+rehearsal (`pnpm db:backup*`) against a real local PostgreSQL; media reconciliation
+(`pnpm media:reconcile`) against real MinIO; retryable contact-notification delivery; real
+S3-compatible protocol testing against MinIO (`s3-storage.adapter.integration.test.ts`); real SMTP
+protocol testing against Mailpit (`smtp-notification.adapter.integration.test.ts`); local secret
+scanning (`pnpm secret-scan`, gitleaks) and dependency audit (`pnpm dependency-audit`); CI wiring
+for all of the above (MinIO and Mailpit service containers, a separate container-build-and-smoke
+job); an accessibility sweep across the three required viewports and all required flows
+(`tests/e2e/accessibility.spec.ts`); real Lighthouse measurements against a real production build
+for all six required pages (`docs/performance-release-gates.md`). Two real production bugs were
+found and fixed in the process (see that doc and `docs/deployment.md`): a CSP-nonce-vs-static-
+generation conflict that 500'd or silently CSP-blocked every framework script on every statically
+rendered page, and a duplicate legacy health controller shadowing the real readiness endpoint.
+
+**Deferred / not done this session**: Lighthouse is not yet wired into CI as an automated gate
+(documented as a Sprint 5 candidate); no container-image vulnerability scan or SBOM generation;
+no Prometheus-style `/metrics` endpoint; no real S3/SMTP production credentials or hosting target
+(none supplied, per this sprint's explicit constraints); portrait and CV remain intentionally NOT
+CONFIGURED (`docs/asset-activation.md`).
