@@ -28,6 +28,7 @@ RUN pnpm install --frozen-lockfile
 # ---- build: generate the Prisma client and compile the Nest app --------------------------------
 FROM deps AS build
 COPY prisma prisma
+COPY prisma.config.ts ./
 COPY apps/api apps/api
 RUN pnpm exec prisma generate
 RUN pnpm --filter @portfolio/api run build
