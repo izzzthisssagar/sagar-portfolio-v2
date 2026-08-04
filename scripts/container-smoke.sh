@@ -74,7 +74,12 @@ done
 [ "$consecutive_ready" -ge 3 ] || fail "postgres did not become stably ready"
 
 echo "--- running database migrations against the smoke postgres ---"
+# CI=true: without it, `pnpm exec` runs its own dependency-status check against this Docker
+# layer's copied-in node_modules, decides a reinstall is needed, and — with no TTY available in a
+# non-interactive `docker run` — aborts asking for interactive confirmation to purge the modules
+# directory first (pnpm's own error message names this exact fix).
 docker run --rm --network "$NET" \
+  -e CI=true \
   -e DATABASE_URL="postgresql://postgres:postgres@${PG}:5432/portfolio_smoke" \
   portfolio-api:smoke-migrate \
   pnpm exec prisma migrate deploy || fail "database migration failed"
