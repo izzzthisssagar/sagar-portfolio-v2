@@ -258,6 +258,13 @@ jobs:
           sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-17
+          # The runner's pre-existing unversioned `postgresql-client` (v16) stays installed
+          # alongside this one, and Debian's postgresql-common alternatives keep the
+          # already-installed version as the unversioned `pg_dump`/`pg_restore`/`createdb`
+          # default — installing v17 alone doesn't switch it. Prepend v17's own bin directory to
+          # PATH (via GITHUB_PATH, so it applies to every later step, not just this one) so it's
+          # what actually resolves, matching the postgres:17-alpine server above.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - name: PostgreSQL backup/restore rehearsal
         run: pnpm db:backup-restore-rehearsal
       # Real production build (never `next dev`), real seeded database, the actual standalone

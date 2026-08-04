@@ -74,15 +74,18 @@ done
 [ "$consecutive_ready" -ge 3 ] || fail "postgres did not become stably ready"
 
 echo "--- running database migrations against the smoke postgres ---"
-# CI=true: without it, `pnpm exec` runs its own dependency-status check against this Docker
-# layer's copied-in node_modules, decides a reinstall is needed, and — with no TTY available in a
-# non-interactive `docker run` — aborts asking for interactive confirmation to purge the modules
-# directory first (pnpm's own error message names this exact fix).
+# The prisma *binary* directly (node_modules/.bin/prisma, a real symlink pnpm already created for
+# this root-level devDependency during the image's own `pnpm install`), not `pnpm exec prisma` —
+# `pnpm exec` runs its own dependency-status check first and, against this Docker layer's
+# copied-in node_modules, decided a reinstall was needed; with CI=true (skipping the interactive
+# purge-confirmation it otherwise blocks on) it actually ran one, and that reinstall left the
+# workspace in a broken state ("Command \"prisma\" not found") rather than fixing anything.
+# node_modules/.bin/prisma was always fine — no reinstall of a working, cache-hit image was ever
+# actually necessary.
 docker run --rm --network "$NET" \
-  -e CI=true \
   -e DATABASE_URL="postgresql://postgres:postgres@${PG}:5432/portfolio_smoke" \
   portfolio-api:smoke-migrate \
-  pnpm exec prisma migrate deploy || fail "database migration failed"
+  ./node_modules/.bin/prisma migrate deploy || fail "database migration failed"
 
 docker run --rm --network "$NET" --entrypoint sh "$MINIO_CLIENT_IMAGE" -c "
   mc alias set local http://${MINIO}:9000 minioadmin minioadmin &&
