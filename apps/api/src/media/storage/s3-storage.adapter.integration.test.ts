@@ -189,7 +189,14 @@ minioSuite('S3StorageAdapter against MinIO', () => {
       { length: count },
       (_, i) => `${testPrefix}/paginate/${String(i).padStart(5, '0')}.txt`,
     );
-    await Promise.all(keys.map((key) => put(key, Buffer.from('x'), 'text/plain')));
+    // Bounded concurrency (not one Promise.all of 1000+ requests) — avoids exhausting the local
+    // HTTP agent's socket pool, which was observed to make an unrelated later test's "unreachable
+    // endpoint" connection-timeout assertion flaky by starving it of available sockets.
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+      const batch = keys.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map((key) => put(key, Buffer.from('x'), 'text/plain')));
+    }
     const allKeys = await adapter.list();
     for (const key of keys) {
       expect(allKeys).toContain(key);
