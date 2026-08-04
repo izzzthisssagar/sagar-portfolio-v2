@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { ContactStatus, Prisma } from '@prisma/client';
-import { recordContactNotification } from '../metrics/registry';
+import { ContactStatus, Prisma, type PrismaClient } from '@prisma/client';
+import { recordContactNotification, recordDatabaseFailure } from '../metrics/registry';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ContactStatusInput, ListContactMessagesDto, SubmitContactDto } from './contact.dto';
 import {
@@ -20,11 +20,13 @@ const messageView = <T extends { status: ContactStatus }>(row: T) => ({
 const DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const MAX_SEND_ATTEMPTS = 2;
 
-/** Total delivery attempts (the original submit-time attempt plus every manual retry) a single
- * message may accumulate before the retry endpoint refuses further attempts — a persistent
- * configuration failure (e.g. a dead SMTP relay) must surface as "stop and investigate", not loop
- * forever eating admin clicks. See docs/contact-delivery.md. */
-const MAX_DELIVERY_ATTEMPTS = 5;
+/** Total real ContactNotificationAdapter.send() invocations (the automatic sends `submit()` makes
+ * plus every manual retry) a single message may accumulate before the retry endpoint refuses
+ * further attempts — a persistent configuration failure (e.g. a dead SMTP relay) must surface as
+ * "stop and investigate", not loop forever eating admin clicks. Enforced against the real
+ * ContactDeliveryAttempt row count — one row per real send, always (see `recordAttempt` below) —
+ * never against a summarized/collapsed count. See docs/contact-delivery.md. */
+export const MAX_DELIVERY_ATTEMPTS = 5;
 
 /** How long a retry claim (ContactMessage.retryClaimedAt) is honored before it's treated as
  * abandoned — e.g. the process crashed mid-attempt — and becomes reclaimable. Matches
@@ -38,6 +40,39 @@ export class ContactService {
     private readonly prisma: PrismaService,
     @Inject(CONTACT_NOTIFICATION_ADAPTER) private readonly notifier: ContactNotificationAdapter,
   ) {}
+
+  /**
+   * Records exactly one real `ContactNotificationAdapter.send()` outcome as its own row — every
+   * call site below calls this once per real send, never once per message. `attemptNumber` is
+   * allocated by reading the current per-message maximum and adding one, inside the same Prisma
+   * client passed in (the caller decides whether that's a `$transaction` callback's `tx` or the
+   * plain client) — combined with the `@@unique([contactMessageId, attemptNumber])` constraint on
+   * the table itself, a concurrent allocation race becomes a loud, immediate database error
+   * instead of two attempts silently sharing a number (or one silently overwriting the other).
+   * Manual retries are additionally serialized at the application level by
+   * `ContactMessage.retryClaimedAt` before this is ever called, so that constraint is a backstop
+   * here, not the only thing standing between two concurrent real sends.
+   */
+  private async recordAttempt(
+    client: Pick<PrismaClient, 'contactDeliveryAttempt'>,
+    contactMessageId: string,
+    result: { delivered: boolean; reason?: string },
+  ) {
+    const { _max } = await client.contactDeliveryAttempt.aggregate({
+      where: { contactMessageId },
+      _max: { attemptNumber: true },
+    });
+    const attemptNumber = (_max.attemptNumber ?? 0) + 1;
+    const attempt = await client.contactDeliveryAttempt.create({
+      data: {
+        contactMessageId,
+        attemptNumber,
+        success: result.delivered,
+        ...(result.reason ? { reason: result.reason } : {}),
+      },
+    });
+    return attempt;
+  }
 
   /**
    * Always resolves to the same generic outcome regardless of what happened internally (honeypot
@@ -71,25 +106,28 @@ export class ContactService {
       },
     });
 
-    let lastResult: { delivered: boolean; reason?: string } = { delivered: false };
     for (let attempt = 0; attempt < MAX_SEND_ATTEMPTS; attempt += 1) {
-      lastResult = await this.notifier.send({
+      const result = await this.notifier.send({
         id: created.id,
         name: created.name,
         email: created.email,
         subject: created.subject,
         message: created.message,
       });
-      recordContactNotification(lastResult.delivered);
-      if (lastResult.delivered) break;
+      recordContactNotification(result.delivered);
+      try {
+        await this.recordAttempt(this.prisma, created.id, result);
+      } catch {
+        // The real SMTP send already happened regardless of whether it could be durably
+        // recorded — this must never surface as a 500 to the public submitter (submit()'s own
+        // contract, above: always the same generic outcome; the message itself is already
+        // safely persisted). It must also never be silently pretended-successful: this is the
+        // same signal apps/api/src/shared.ts's global ErrorEnvelopeFilter would emit had this
+        // exception propagated to the HTTP boundary instead of being caught here.
+        recordDatabaseFailure();
+      }
+      if (result.delivered) break;
     }
-    await this.prisma.contactDeliveryAttempt.create({
-      data: {
-        contactMessageId: created.id,
-        success: lastResult.delivered,
-        ...(lastResult.reason ? { reason: lastResult.reason } : {}),
-      },
-    });
   }
 
   /**
@@ -138,27 +176,29 @@ export class ContactService {
     });
     recordContactNotification(result.delivered);
 
-    await this.prisma.$transaction([
-      this.prisma.contactDeliveryAttempt.create({
-        data: {
-          contactMessageId: id,
-          success: result.delivered,
-          ...(result.reason ? { reason: result.reason } : {}),
-        },
-      }),
-      // Clears the claim regardless of outcome — a failed retry must remain retryable (up to
-      // MAX_DELIVERY_ATTEMPTS), not get stuck permanently claimed.
-      this.prisma.contactMessage.update({ where: { id }, data: { retryClaimedAt: null } }),
-      this.prisma.auditLog.create({
+    // A single real send, recorded as exactly one attempt row — allocating the attempt number
+    // and clearing the claim inside the same transaction as the row's creation means a failure
+    // partway through (e.g. the attempt-row INSERT itself fails) rolls the claim-clear back too,
+    // leaving retryClaimedAt set from the updateMany above: a genuinely "documented and
+    // recoverable" state — this message stays claimed, so an immediate second retry click gets
+    // RETRY_IN_PROGRESS rather than sending again, and becomes reclaimable once more after
+    // RETRY_CLAIM_TTL_MS, never an uncontrolled retry loop. Left to propagate, not swallowed: the
+    // global ErrorEnvelopeFilter (apps/api/src/shared.ts) turns this into a real 500 for the
+    // admin caller and records it via recordDatabaseFailure() itself — this must never come back
+    // as a false "retried successfully" response.
+    await this.prisma.$transaction(async (tx) => {
+      const attempt = await this.recordAttempt(tx, id, result);
+      await tx.contactMessage.update({ where: { id }, data: { retryClaimedAt: null } });
+      await tx.auditLog.create({
         data: {
           action: 'CONTACT_MESSAGE_NOTIFICATION_RETRIED',
           resource: 'ContactMessage',
           resourceId: id,
           ...(actorId ? { actorId } : {}),
-          metadata: { delivered: result.delivered },
+          metadata: { delivered: result.delivered, attemptNumber: attempt.attemptNumber },
         },
-      }),
-    ]);
+      });
+    });
 
     return this.get(id);
   }
@@ -182,11 +222,24 @@ export class ContactService {
         orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        include: { deliveryAttempts: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        include: {
+          deliveryAttempts: { orderBy: { createdAt: 'desc' }, take: 1 },
+          _count: { select: { deliveryAttempts: true } },
+        },
       }),
       this.prisma.contactMessage.count({ where }),
     ]);
-    return { data: data.map(messageView), meta: { page: query.page, limit: query.limit, total } };
+    return {
+      // retryExhausted is explicit, not left for the CMS to infer from array length: the list
+      // view's own `deliveryAttempts` array is deliberately truncated to the latest one (a full
+      // history is only fetched by get()), so `_count` — never included in the response itself —
+      // is the only accurate source for "has this message hit MAX_DELIVERY_ATTEMPTS real sends".
+      data: data.map(({ _count, ...row }) => ({
+        ...messageView(row),
+        retryExhausted: _count.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS,
+      })),
+      meta: { page: query.page, limit: query.limit, total },
+    };
   }
 
   async get(id: string) {
@@ -195,7 +248,10 @@ export class ContactService {
       include: { deliveryAttempts: { orderBy: { createdAt: 'desc' } } },
     });
     if (!row) throw new NotFoundException('Message not found');
-    return messageView(row);
+    return {
+      ...messageView(row),
+      retryExhausted: row.deliveryAttempts.length >= MAX_DELIVERY_ATTEMPTS,
+    };
   }
 
   async updateStatus(id: string, status: ContactStatusInput, actorId?: string) {

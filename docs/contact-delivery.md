@@ -45,13 +45,23 @@ _USERNAME/_PASSWORD/_FROM` and `CONTACT_NOTIFICATION_TO`. Production requires th
    message — persistence never depends on delivery config — but the delivery attempt is recorded
    as a permanent failure with a clear `MISSING_CONFIGURATION` reason instead of retrying forever).
 
-Every attempt is persisted as a delivery-attempt record (`success | failure`, timestamp, reason) —
-never logged with the message body or personal data, only the message id and outcome. A bounded
-retry policy (small fixed number of attempts with backoff) applies to transient SMTP failures only;
-permanently invalid configuration (missing env vars, auth rejected) is not retried. The admin
-dashboard/inbox surfaces failed deliveries so a human can follow up manually if automated delivery
-never succeeds — the message itself is never lost even if every delivery attempt fails, because it
-was already durably persisted in step one.
+**An "attempt" means one real call to `ContactNotificationAdapter.send` — never a summary of the
+outcome.** Every real send, automatic or manual, is persisted as its own `ContactDeliveryAttempt`
+row (`contactMessageId`, `attemptNumber`, `success`, `reason?`, `createdAt`) — never logged with
+the message body or personal data, only the message id and outcome. `attemptNumber` is
+monotonically increasing per message, allocated from the persisted maximum
+(`aggregate({_max: {attemptNumber}})`) inside the same transaction as the write, and enforced
+unique by a `@@unique([contactMessageId, attemptNumber])` database constraint — two concurrent
+sends can never be recorded under the same number, and no send can go unrecorded (see
+`ContactService.recordAttempt`, `apps/api/src/contact/contact.service.ts`).
+
+The initial `POST /api/v1/contact` submission itself may make up to two real sends (one immediate
+attempt, one automatic retry on failure, both bounded by `MAX_DELIVERY_ATTEMPTS`) — each is its own
+attempt row, numbered 1 and 2. A bounded retry policy (small fixed number of attempts with backoff)
+applies to transient SMTP failures only; permanently invalid configuration (missing env vars, auth
+rejected) is not retried. The admin dashboard/inbox surfaces failed deliveries so a human can
+follow up manually if automated delivery never succeeds — the message itself is never lost even if
+every delivery attempt fails, because it was already durably persisted in step one.
 
 The public API response is always the same generic success shape regardless of delivery outcome —
 delivery-provider details are never exposed to the caller.
@@ -70,17 +80,29 @@ failed. Implementation: `ContactService.retryNotification` (`apps/api/src/contac
   reclaimable. A reliable database-backed claim is sufficient for this single-administrator
   portfolio — a distributed queue would be solving a problem that doesn't exist here.
 - **Bounded, not infinite**: a message that has accumulated `MAX_DELIVERY_ATTEMPTS` (5, counting
-  the original submit-time attempt) delivery-attempt rows refuses further retries with
+  the original submit-time attempts) real-send attempt rows refuses further retries with
   `409 RETRY_LIMIT_REACHED` — a persistently broken SMTP configuration must surface as "stop and
-  investigate", not silently consume admin clicks forever.
+  investigate", not silently consume admin clicks forever. Because the limit is checked against
+  real attempt rows (one per real send, never per API call), it cannot be inflated or evaded by
+  retrying quickly or concurrently.
 - **Claim held**: a retry already in flight (or a full send/release round trip so fast the second
-  request's claim attempt lands before the first releases it) gets `409 RETRY_IN_PROGRESS`.
-- Every attempt — success or failure — is recorded as a new `ContactDeliveryAttempt` row and an
-  `AuditLog` entry (`CONTACT_MESSAGE_NOTIFICATION_RETRIED`), and the claim is released
-  unconditionally afterward so a failed retry remains retryable.
+  request's claim attempt lands before the first releases it) gets `409 RETRY_IN_PROGRESS` — the
+  atomic claim (`updateMany` above) guarantees at most one real SMTP send and one allocated
+  `attemptNumber` per retry, even under concurrent requests; the losing request never calls the
+  notification adapter and never consumes an attempt slot.
+- Every real send — success or failure — allocates its own `ContactDeliveryAttempt` row
+  (see above) and, for manual retries, an `AuditLog` entry
+  (`CONTACT_MESSAGE_NOTIFICATION_RETRIED`) recording the real `attemptNumber` and outcome; the
+  attempt-row write, claim release, and audit entry share one database transaction, so a failure
+  partway through (e.g. the message being deleted mid-send) never leaves a phantom attempt row or
+  a falsely-cleared claim — the claim is released unconditionally only after a successful attempt
+  write, so a failed retry remains retryable rather than getting silently stuck.
 - The message body is never logged — only the outcome, same as the original submit-time delivery.
-- The CMS message list/detail view (`ContactRowActions.tsx`) shows a **RETRY NOTIFICATION** button
-  whenever the latest delivery attempt failed, behind the same keyboard-accessible
+- `ContactMessage`/list and detail API responses expose `retryExhausted: boolean` — explicit,
+  server-derived from the real attempt count (`>= MAX_DELIVERY_ATTEMPTS`), not left for the CMS to
+  infer from a possibly-truncated `deliveryAttempts` array. The CMS message list/detail view
+  (`ContactRowActions.tsx`) shows a **RETRY NOTIFICATION** button whenever the latest delivery
+  attempt failed **and** `retryExhausted` is `false`, behind the same keyboard-accessible
   confirm-dialog pattern used for delete. The dashboard's existing `failedNotifications` count
   (`apps/api/src/dashboard/dashboard.service.ts`) reflects retries automatically — no separate
   counter to keep in sync.

@@ -18,7 +18,10 @@ const baseMessage = {
 
 function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {}) {
   const auditCreate = vi.fn().mockResolvedValue({});
-  const deliveryCreate = vi.fn().mockResolvedValue({});
+  const deliveryCreate = vi.fn().mockResolvedValue({ attemptNumber: 1 });
+  // Every recordAttempt() call reads the current max attemptNumber first — a fresh message with
+  // no prior attempts, matching baseMessage's empty deliveryAttempts, unless a test overrides it.
+  const deliveryAggregate = vi.fn().mockResolvedValue({ _max: { attemptNumber: null } });
   const messageUpdate = vi.fn().mockResolvedValue(baseMessage);
   const messageUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const tx = {
@@ -26,19 +29,20 @@ function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {
       update: vi.fn().mockResolvedValue({ ...baseMessage, status: 'READ' }),
       delete: vi.fn().mockResolvedValue(baseMessage),
     },
+    contactDeliveryAttempt: { create: deliveryCreate, aggregate: deliveryAggregate },
     auditLog: { create: auditCreate },
   };
   const prisma = {
     contactMessage: {
       findFirst: vi.fn().mockResolvedValue(null),
-      findMany: vi.fn().mockResolvedValue([baseMessage]),
+      findMany: vi.fn().mockResolvedValue([{ ...baseMessage, _count: { deliveryAttempts: 0 } }]),
       findUnique: vi.fn().mockResolvedValue(baseMessage),
       count: vi.fn().mockResolvedValue(1),
       create: vi.fn().mockResolvedValue(baseMessage),
       update: messageUpdate,
       updateMany: messageUpdateMany,
     },
-    contactDeliveryAttempt: { create: deliveryCreate },
+    contactDeliveryAttempt: { create: deliveryCreate, aggregate: deliveryAggregate },
     auditLog: { create: auditCreate },
     $transaction: vi.fn((value: unknown) =>
       typeof value === 'function'
@@ -53,6 +57,7 @@ function setup(adapterOverrides: Partial<{ send: ReturnType<typeof vi.fn> }> = {
     tx,
     auditCreate,
     deliveryCreate,
+    deliveryAggregate,
     messageUpdate,
     messageUpdateMany,
     notifier,
@@ -181,7 +186,7 @@ describe('ContactService.retryNotification', () => {
   });
 
   it('on a successful claim, sends once, records the attempt, clears the claim, and audits — even on delivery failure', async () => {
-    const { service, prisma, notifier, deliveryCreate, messageUpdate, auditCreate } = setup({
+    const { service, prisma, notifier, tx, deliveryCreate, auditCreate } = setup({
       send: vi.fn().mockResolvedValue({ delivered: false, reason: 'SMTP timeout' }),
     });
     await service.retryNotification('msg1', 'admin1');
@@ -200,14 +205,17 @@ describe('ContactService.retryNotification', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           contactMessageId: 'msg1',
+          attemptNumber: 1,
           success: false,
           reason: 'SMTP timeout',
         }),
       }),
     );
     // The claim is always released, whether delivery succeeded or not — a failed retry must
-    // remain retryable up to MAX_DELIVERY_ATTEMPTS.
-    expect(messageUpdate).toHaveBeenCalledWith({
+    // remain retryable up to MAX_DELIVERY_ATTEMPTS. Cleared inside the same transaction as the
+    // attempt-row create (see contact.service.ts) — tx.contactMessage.update, not the top-level
+    // prisma.contactMessage.update.
+    expect(tx.contactMessage.update).toHaveBeenCalledWith({
       where: { id: 'msg1' },
       data: { retryClaimedAt: null },
     });

@@ -582,6 +582,11 @@ export interface AdminContactMessage {
   status: 'new' | 'read' | 'replied' | 'archived' | 'spam';
   createdAt: string;
   deliveryAttempts?: AdminContactDeliveryAttempt[];
+  /** True once this message has reached MAX_DELIVERY_ATTEMPTS real notification sends (automatic
+   * plus manual retries combined) — explicit from the API rather than inferred client-side from
+   * `deliveryAttempts.length`, since the list view only ever includes the latest one attempt, not
+   * the full history get() returns. See apps/api/src/contact/contact.service.ts. */
+  retryExhausted: boolean;
 }
 
 export interface ContactMessageListResult {

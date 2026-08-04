@@ -247,10 +247,19 @@ databaseSuite('Contact messages: submission, honeypot, delivery tracking, admin 
       .expect(200);
     const created = await prisma.contactMessage.findFirstOrThrow({ where: { email } });
     // Fast-forward past the cap directly — MAX_DELIVERY_ATTEMPTS (5) in contact.service.ts — the
-    // real submit-time attempt plus manual retries share the same counter.
+    // real submit-time attempt(s) plus manual retries share the same counter. attemptNumber
+    // continues on from whatever submit() above already created (real ContactDeliveryAttempt
+    // rows, not a fixture) — @@unique([contactMessageId, attemptNumber]) requires each fixture
+    // row to have its own number, not just a matching count.
+    const existingMax = await prisma.contactDeliveryAttempt.aggregate({
+      where: { contactMessageId: created.id },
+      _max: { attemptNumber: true },
+    });
+    const startAt = (existingMax._max.attemptNumber ?? 0) + 1;
     await prisma.contactDeliveryAttempt.createMany({
-      data: Array.from({ length: 5 }, () => ({
+      data: Array.from({ length: 5 }, (_, i) => ({
         contactMessageId: created.id,
+        attemptNumber: startAt + i,
         success: false,
         reason: 'fixture',
       })),

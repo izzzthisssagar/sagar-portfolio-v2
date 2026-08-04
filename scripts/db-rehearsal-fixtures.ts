@@ -103,7 +103,7 @@ async function main() {
         },
       });
       await tx.contactDeliveryAttempt.create({
-        data: { contactMessageId: message.id, success: true },
+        data: { contactMessageId: message.id, attemptNumber: 1, success: true },
       });
     });
 

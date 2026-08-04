@@ -332,15 +332,22 @@ model ContactMessage {
 }
 
 /// One row per notification-delivery attempt for a ContactMessage — never the message body or
-/// any personal data, only outcome. See docs/contact-delivery.md.
+/// any personal data, only outcome. One row per real ContactNotificationAdapter.send() call,
+/// always — never one row summarizing several sends (see docs/contact-delivery.md).
+/// attemptNumber is monotonically increasing per ContactMessage, starting at 1; the
+/// @@unique constraint is the database-enforced backstop against two concurrent allocations
+/// ever landing on the same number (application code also serializes real sends via
+/// ContactMessage.retryClaimedAt for manual retries).
 model ContactDeliveryAttempt {
   id               String         @id @default(cuid())
   contactMessageId String
   contactMessage   ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+  attemptNumber    Int
   success          Boolean
   reason           String?
   createdAt        DateTime       @default(now())
 
+  @@unique([contactMessageId, attemptNumber])
   @@index([contactMessageId])
 }
 
