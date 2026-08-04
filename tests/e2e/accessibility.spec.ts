@@ -1,14 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
-import {
-  expect,
-  test,
-  type Browser,
-  type BrowserContext,
-  type Cookie,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type Cookie, type Page } from '@playwright/test';
 import { hasDatabase } from '../../playwright.config';
-import { loginViaUI } from './helpers';
+import { loginOnceAndCaptureCookies, useSharedSession } from './helpers';
 
 /**
  * Sprint 4 accessibility/responsive release sweep: axe scans (no serious/critical violations)
@@ -25,31 +18,6 @@ const VIEWPORTS = [
   { name: 'tablet-768', width: 768, height: 1024 },
   { name: 'desktop-1440', width: 1440, height: 900 },
 ];
-
-/**
- * Logs in once for real through the actual UI form (never a forged/bypass token — matches this
- * suite's existing security posture), then hands back the resulting session cookies so later
- * tests can reuse the same live, database-backed session via `context.addCookies()` instead of
- * each calling loginViaUI itself. `/api/v1/auth/login` carries its own strict per-route rate
- * limit (20 requests/60s — docs/security-production.md), separate from the raised
- * RATE_LIMIT_MAX global CI budget; a dozen-plus fresh UI logins concentrated in one spec file
- * was observed (by actually running this suite) to trip it and fail every subsequent login with
- * a generic "Something went wrong" error — this is the fix, not a workaround around real auth.
- */
-async function loginOnceAndCaptureCookies(browser: Browser): Promise<Cookie[]> {
-  const context = await browser.newContext();
-  try {
-    const page = await context.newPage();
-    await loginViaUI(page);
-    return await context.cookies();
-  } finally {
-    await context.close();
-  }
-}
-
-async function useSharedSession(context: BrowserContext, cookies: Cookie[]): Promise<void> {
-  await context.addCookies(cookies);
-}
 
 async function assertNoSeriousViolations(page: Page, label: string) {
   const results = await new AxeBuilder({ page }).analyze();

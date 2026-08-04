@@ -339,6 +339,16 @@ input {
   grid-template-columns: 240px 1fr;
   min-height: calc(100svh - var(--header));
 }
+/* Grid items default to `min-width: auto`, meaning a track won't shrink below the min-content
+ * width of whatever's inside it — any sufficiently wide, unshrinkable descendant (a data table,
+ * a long unbroken string) silently blows the whole grid past the viewport instead of wrapping or
+ * scrolling internally. `min-width: 0` opts both columns out of that default so nested content
+ * (the "table-scroll" wrapper in particular) is free to size — and internally scroll — within
+ * the space this grid actually has, at every viewport width. */
+.admin-nav,
+.admin-main {
+  min-width: 0;
+}
 .admin-nav {
   padding: 2rem;
   border-right: 1px solid var(--line);
@@ -469,6 +479,12 @@ input {
 .project-filters .field {
   margin: 0;
   min-width: 10rem;
+}
+/* Data tables don't shrink below their content's natural width (long timestamps, action names) —
+ * without this, a table wider than a narrow viewport forces the whole page to scroll
+ * horizontally. Scrolling the table alone, in its own box, keeps the page itself contained. */
+.table-scroll {
+  overflow-x: auto;
 }
 .project-table {
   width: 100%;
@@ -782,6 +798,7 @@ input {
 }
 .dashboard-audit-table {
   width: 100%;
+  min-width: 30rem;
   border-collapse: collapse;
   font-size: 0.8rem;
 }

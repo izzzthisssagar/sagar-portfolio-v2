@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Cookie } from '@playwright/test';
 import { hasDatabase } from '../../playwright.config';
-import { loginViaUI } from './helpers';
+import { loginOnceAndCaptureCookies, useSharedSession } from './helpers';
 
 test.skip(!hasDatabase, 'requires DATABASE_URL for the live API + a provisioned admin account');
 
@@ -20,11 +20,21 @@ function uniquePng(): Buffer {
 }
 
 test.describe('CMS media pipeline', () => {
+  // One real UI login shared by both cases below — see helpers.ts's loginOnceAndCaptureCookies
+  // for why (the login route's own strict 20/60s budget is shared across the whole sequential
+  // e2e suite, not just this file).
+  let authCookies: Cookie[] = [];
+
+  test.beforeAll(async ({ browser }) => {
+    authCookies = await loginOnceAndCaptureCookies(browser);
+  });
+
   test('uploads to quarantine, blocks unapproved public access, approves, then serves publicly', async ({
     page,
+    context,
     request,
   }) => {
-    await loginViaUI(page);
+    await useSharedSession(context, authCookies);
     await page.goto('/admin/media');
 
     await page
@@ -58,9 +68,10 @@ test.describe('CMS media pipeline', () => {
 
   test('rejects with a reason, and rejected media never becomes public', async ({
     page,
+    context,
     request,
   }) => {
-    await loginViaUI(page);
+    await useSharedSession(context, authCookies);
     await page.goto('/admin/media');
 
     await page

@@ -52,40 +52,42 @@ export default async function PostsPage({
         <p>No posts match these filters yet.</p>
       ) : (
         <>
-          <table className="project-table">
-            <thead>
-              <tr>
-                <th scope="col">Title</th>
-                <th scope="col">Slug</th>
-                <th scope="col">Status</th>
-                <th scope="col">Tags</th>
-                <th scope="col">Updated</th>
-                <th scope="col">Published</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.map((post) => (
-                <tr key={post.id}>
-                  <td>{post.title}</td>
-                  <td>{post.slug}</td>
-                  <td>
-                    <span className={`status-badge status-badge--${post.status}`}>
-                      {STATUS_LABELS[post.status] ?? post.status}
-                    </span>
-                  </td>
-                  <td>{post.tags.join(', ') || '—'}</td>
-                  <td>{new Date(post.updatedAt).toLocaleDateString()}</td>
-                  <td>
-                    {post.publishedAt ? new Date(post.publishedAt).toLocaleDateString() : '—'}
-                  </td>
-                  <td>
-                    <PostRowActions post={post} />
-                  </td>
+          <div className="table-scroll" role="region" aria-label="Field Notes posts" tabIndex={0}>
+            <table className="project-table">
+              <thead>
+                <tr>
+                  <th scope="col">Title</th>
+                  <th scope="col">Slug</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Tags</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">Published</th>
+                  <th scope="col">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {result.data.map((post) => (
+                  <tr key={post.id}>
+                    <td>{post.title}</td>
+                    <td>{post.slug}</td>
+                    <td>
+                      <span className={`status-badge status-badge--${post.status}`}>
+                        {STATUS_LABELS[post.status] ?? post.status}
+                      </span>
+                    </td>
+                    <td>{post.tags.join(', ') || '—'}</td>
+                    <td>{new Date(post.updatedAt).toLocaleDateString()}</td>
+                    <td>
+                      {post.publishedAt ? new Date(post.publishedAt).toLocaleDateString() : '—'}
+                    </td>
+                    <td>
+                      <PostRowActions post={post} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <nav aria-label="Post pagination" className="pagination">
             {page > 1 && <Link href={pageHref(page - 1)}>PREVIOUS</Link>}
             <span>
