@@ -85,6 +85,19 @@ failed. Implementation: `ContactService.retryNotification` (`apps/api/src/contac
   (`apps/api/src/dashboard/dashboard.service.ts`) reflects retries automatically — no separate
   counter to keep in sync.
 
+## Real SMTP protocol testing (Sprint 4)
+
+`apps/api/src/contact/notification/smtp-notification.adapter.integration.test.ts` exercises
+`SmtpNotificationAdapter` over the real SMTP protocol against Mailpit — never a mocked
+`nodemailer` transport. Gated on `MAILPIT_API_URL` the same way
+`s3-storage.adapter.integration.test.ts` gates on `MEDIA_STORAGE_ENDPOINT`: self-skips when no
+Mailpit instance is configured locally, required in CI. Covers: a successful send captured with
+the correct recipient/`Reply-To`/subject, the plain-text body (including that HTML in visitor
+input is delivered as literal text, never rendered), Unicode content round-tripping correctly, and
+`delivered: false` with a non-throwing, credential-free `reason` against an unreachable host and
+against a reachable-but-non-SMTP port. This proves the SMTP _protocol_ works against Mailpit — it
+is not, and must never be described as, verification against a real production mail provider.
+
 ## Configuration
 
 See the env var block in `docs/sprint-3.md`.
