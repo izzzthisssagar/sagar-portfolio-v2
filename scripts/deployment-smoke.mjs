@@ -130,10 +130,54 @@ async function main() {
   });
   await check(results, 'web: security headers present on homepage', async () => {
     const { response } = await fetchWithTimeout(`${webBase}/`, {}, args.timeout);
-    const required = ['x-content-type-options', 'referrer-policy'];
+    // Full set docs/security-production.md documents for the web app. HSTS is checked
+    // separately below (only sent over an actual HTTPS deployment, per that doc), and CSP's
+    // exact directive content is asserted by apps/web/lib/security-headers.test.ts — here we
+    // only confirm the header is present at all against a real running deployment.
+    const required = [
+      'x-content-type-options',
+      'referrer-policy',
+      'content-security-policy',
+      'permissions-policy',
+      'x-frame-options',
+    ];
     const missing = required.filter((h) => !response.headers.get(h));
     if (missing.length) throw new Error(`missing headers: ${missing.join(', ')}`);
     return { headers: Object.fromEntries(required.map((h) => [h, response.headers.get(h)])) };
+  });
+  await check(results, 'web: HSTS present when served over HTTPS', async () => {
+    if (!webBase.startsWith('https://')) {
+      return {
+        skipped: 'base-url is not https — HSTS is only ever sent over a real TLS connection',
+      };
+    }
+    const { response } = await fetchWithTimeout(`${webBase}/`, {}, args.timeout);
+    if (!response.headers.get('strict-transport-security')) {
+      throw new Error('missing strict-transport-security header over an https base-url');
+    }
+  });
+  await check(results, 'web: homepage has a canonical link tag', async () => {
+    const { response } = await fetchWithTimeout(`${webBase}/`, {}, args.timeout);
+    const html = await response.text();
+    const match = html.match(/<link[^>]+rel="canonical"[^>]+href="([^"]+)"/);
+    if (!match) throw new Error('no <link rel="canonical"> found in homepage HTML');
+    return { canonical: match[1] };
+  });
+  await check(results, 'web: homepage JSON-LD is present and parses as valid JSON', async () => {
+    const { response } = await fetchWithTimeout(`${webBase}/`, {}, args.timeout);
+    const html = await response.text();
+    const match = html.match(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/);
+    if (!match) throw new Error('no <script type="application/ld+json"> found in homepage HTML');
+    let parsed;
+    try {
+      parsed = JSON.parse(match[1]);
+    } catch (err) {
+      throw new Error(`JSON-LD did not parse: ${err instanceof Error ? err.message : err}`);
+    }
+    if (!parsed['@context'] || !parsed['@type']) {
+      throw new Error(`JSON-LD is missing @context/@type: ${JSON.stringify(parsed)}`);
+    }
+    return { type: parsed['@type'] };
   });
 
   // ---- API -------------------------------------------------------------------------------
@@ -162,6 +206,68 @@ async function main() {
       args.timeout,
     );
     expectStatus(response, 200);
+  });
+  let liveProjectTitle = null;
+  await check(results, `api: public project detail responds (${args.projectSlug})`, async () => {
+    const { response } = await fetchWithTimeout(
+      `${apiBase}/api/v1/projects/${args.projectSlug}`,
+      {},
+      args.timeout,
+    );
+    expectStatus(response, 200);
+    const body = await response.json();
+    const title = body?.data?.title ?? body?.title;
+    if (typeof title !== 'string' || !title) {
+      throw new Error(`expected a project with a title, got: ${JSON.stringify(body)}`);
+    }
+    liveProjectTitle = title;
+    return { title };
+  });
+  await check(
+    results,
+    'web: project page renders live API content, not static fallback data',
+    async () => {
+      if (!liveProjectTitle) {
+        throw new Error('skipped — the API project-detail check above did not succeed');
+      }
+      const { response } = await fetchWithTimeout(
+        `${webBase}/work/${args.projectSlug}`,
+        {},
+        args.timeout,
+      );
+      expectStatus(response, 200);
+      const html = await response.text();
+      if (!html.includes(liveProjectTitle)) {
+        throw new Error(
+          `web page for "${args.projectSlug}" does not contain the live API's project title ` +
+            `("${liveProjectTitle}") — it may be silently serving static fallback content ` +
+            '(ALLOW_STATIC_CONTENT_FALLBACK) instead of the real database-backed page.',
+        );
+      }
+    },
+  );
+  await check(results, 'api: CORS allows the configured web origin', async () => {
+    const { response } = await fetchWithTimeout(
+      `${apiBase}/api/v1/projects?page=1&limit=1`,
+      { headers: { Origin: webBase } },
+      args.timeout,
+    );
+    const allowOrigin = response.headers.get('access-control-allow-origin');
+    if (allowOrigin !== webBase) {
+      throw new Error(`expected access-control-allow-origin "${webBase}", got "${allowOrigin}"`);
+    }
+  });
+  await check(results, 'api: CORS does not reflect an arbitrary untrusted origin', async () => {
+    const untrustedOrigin = 'https://untrusted-origin.example.invalid';
+    const { response } = await fetchWithTimeout(
+      `${apiBase}/api/v1/projects?page=1&limit=1`,
+      { headers: { Origin: untrustedOrigin } },
+      args.timeout,
+    );
+    const allowOrigin = response.headers.get('access-control-allow-origin');
+    if (allowOrigin === untrustedOrigin) {
+      throw new Error('API reflected an untrusted Origin back in access-control-allow-origin');
+    }
   });
   await check(results, 'api: unknown media id returns 404 with a safe envelope', async () => {
     const { response } = await fetchWithTimeout(
